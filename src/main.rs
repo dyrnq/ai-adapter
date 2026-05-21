@@ -103,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
             Commands::Session { action } => {
                 match action {
                     SessionAction::Ls { endpoint } => {
-                        commands::session::run(&endpoint, "ls").await?;
+                        commands::session::run(endpoint, "ls").await?;
                     }
                 }
                 return Ok(());

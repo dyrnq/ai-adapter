@@ -244,6 +244,7 @@ pub fn chat_content_to_string(content: &Option<ChatContent>) -> String {
 }
 
 /// Helper: check if chat content has images
+#[allow(dead_code)]
 pub fn chat_content_has_image(content: &Option<ChatContent>) -> bool {
     match content {
         Some(ChatContent::Parts(parts)) => parts

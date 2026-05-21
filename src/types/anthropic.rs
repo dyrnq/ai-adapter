@@ -228,6 +228,7 @@ pub struct AnthropicUsageOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)]
 pub enum AnthropicContentBlockDelta {
     #[serde(rename = "text_delta")]
     TextDelta { text: String },
@@ -247,6 +248,7 @@ pub struct AnthropicErrorDetails {
 }
 
 /// Helper: extract text from Anthropic content blocks
+#[allow(dead_code)]
 pub fn anthropic_blocks_to_text(blocks: &[AnthropicContentBlock]) -> String {
     blocks
         .iter()

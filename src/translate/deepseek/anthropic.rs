@@ -100,19 +100,13 @@ fn map_tool_choice(tc: &Option<Value>) -> Option<AnthropicToolChoice> {
     match tc {
         Some(Value::String(s)) if s == "auto" => Some(AnthropicToolChoice::Auto),
         Some(Value::String(s)) if s == "required" || s == "any" => Some(AnthropicToolChoice::Any),
-        Some(Value::Object(obj)) => {
-            if let Some(name) = obj
-                .get("function")
-                .and_then(|f| f.get("name"))
-                .and_then(|n| n.as_str())
-            {
-                Some(AnthropicToolChoice::Tool {
-                    name: name.to_string(),
-                })
-            } else {
-                None
-            }
-        }
+        Some(Value::Object(obj)) => obj
+            .get("function")
+            .and_then(|f| f.get("name"))
+            .and_then(|n| n.as_str())
+            .map(|name| AnthropicToolChoice::Tool {
+                name: name.to_string(),
+            }),
         _ => None,
     }
 }
@@ -470,7 +464,7 @@ fn sanitize_anthropic_messages(messages: Vec<AnthropicMessage>) -> Vec<Anthropic
         if !tool_use_ids.is_empty() {
             // The next message *must* be a user message containing
             // tool_result blocks for every tool_use id.
-            let has_valid_follow = iter.peek().map_or(false, |next| {
+            let has_valid_follow = iter.peek().is_some_and(|next| {
                 next.role == "user"
                     && tool_use_ids
                         .iter()

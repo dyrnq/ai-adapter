@@ -523,9 +523,9 @@ async fn handle_chat_completions(
                                     if trimmed.is_empty() || trimmed == "[DONE]" {
                                         continue;
                                     }
-                                    if trimmed.starts_with("data:") {
+                                    if let Some(stripped) = trimmed.strip_prefix("data:") {
                                         let data = if trimmed.len() > 5 {
-                                            trimmed[5..].trim()
+                                            stripped.trim()
                                         } else {
                                             ""
                                         };
@@ -876,9 +876,9 @@ async fn handle_responses_via_chat(
                                         }
                                         continue;
                                     }
-                                    if trimmed.starts_with("data:") {
+                                    if let Some(stripped) = trimmed.strip_prefix("data:") {
                                         let data = if trimmed.len() > 5 {
-                                            trimmed[5..].trim()
+                                            stripped.trim()
                                         } else {
                                             ""
                                         };
@@ -1058,9 +1058,9 @@ async fn handle_responses_via_anthropic(
                                     if trimmed.is_empty() {
                                         continue;
                                     }
-                                    if trimmed.starts_with("data:") {
+                                    if let Some(stripped) = trimmed.strip_prefix("data:") {
                                         let data = if trimmed.len() > 5 {
-                                            trimmed[5..].trim()
+                                            stripped.trim()
                                         } else {
                                             ""
                                         };
@@ -1150,6 +1150,7 @@ async fn handle_passthrough_any(
     passthrough_request(&state, &headers, method, &uri, body_str).await
 }
 
+#[allow(dead_code)]
 async fn handle_passthrough_get(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1158,6 +1159,7 @@ async fn handle_passthrough_get(
     passthrough_request(&state, &headers, Method::GET, &uri, None).await
 }
 
+#[allow(dead_code)]
 async fn handle_passthrough_post(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1303,11 +1305,11 @@ fn extract_bearer(headers: &HeaderMap) -> Option<String> {
     headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| {
-            if v.starts_with("Bearer ") {
-                Some(v[7..].to_string())
+        .map(|v| {
+            if let Some(stripped) = v.strip_prefix("Bearer ") {
+                stripped.to_string()
             } else {
-                Some(v.to_string())
+                v.to_string()
             }
         })
 }

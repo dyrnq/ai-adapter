@@ -53,6 +53,7 @@ impl ReasoningCache {
         Ok(result)
     }
 
+    #[allow(dead_code)]
     pub async fn remove(&self, session_id: &str, response_id: &str) -> anyhow::Result<()> {
         let key = compose_key(session_id, response_id);
         let db = self.db.read().await;

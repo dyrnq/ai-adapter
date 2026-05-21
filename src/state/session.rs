@@ -15,6 +15,7 @@ impl SessionStore {
         Self { db }
     }
 
+    #[allow(dead_code)]
     pub fn db_ref(&self) -> &Arc<RwLock<Database>> {
         &self.db
     }
@@ -35,6 +36,7 @@ impl SessionStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get(&self, session_id: &str) -> anyhow::Result<Option<String>> {
         let db = self.db.read().await;
         let read_txn = db.begin_read()?;
@@ -45,6 +47,7 @@ impl SessionStore {
         Ok(result)
     }
 
+    #[allow(dead_code)]
     pub async fn remove(&self, session_id: &str) -> anyhow::Result<()> {
         let db = self.db.read().await;
         let write_txn = db.begin_write()?;

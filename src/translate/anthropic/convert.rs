@@ -5,6 +5,7 @@ use crate::types::responses::*;
 ///
 /// This handles genuine Anthropic upstream — not DeepSeek's Anthropic-compatible endpoint
 /// (which may require different mapping for thinking/content blocks).
+#[allow(dead_code)]
 pub fn convert_anthropic_to_responses(
     anthropic: &AnthropicResponse,
     model: &str,

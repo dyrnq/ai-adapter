@@ -9,26 +9,28 @@ use uuid::Uuid;
 
 /// Parsed SSE event
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SseEvent {
     pub event: Option<String>,
     pub data: String,
 }
 
 /// Parse an SSE byte stream line by line into structured events
+#[allow(dead_code)]
 pub fn parse_sse_line(line: &str) -> Option<SseEvent> {
     let line = line.trim();
     if line.is_empty() {
         return None;
     }
-    if line.starts_with("event:") {
-        let event_type = line[6..].trim().to_string();
+    if let Some(stripped) = line.strip_prefix("event:") {
+        let event_type = stripped.trim().to_string();
         Some(SseEvent {
             event: Some(event_type),
             data: String::new(),
         })
-    } else if line.starts_with("data:") {
+    } else if let Some(stripped) = line.strip_prefix("data:") {
         let data = if line.len() > 5 {
-            line[5..].trim().to_string()
+            stripped.trim().to_string()
         } else {
             String::new()
         };
@@ -65,6 +67,7 @@ pub fn event_type_str(event: &ResponsesStreamEvent) -> &str {
 // Anthropic SSE -> Responses SSE converter
 // ============================================================
 
+#[allow(dead_code)]
 pub struct AnthropicStreamTranslator {
     response_id: String,
     model: String,
@@ -912,6 +915,7 @@ impl ChatStreamToResponsesTranslator {
 // Responses SSE -> Chat SSE converter
 // ============================================================
 
+#[allow(dead_code)]
 pub struct ResponsesStreamToChatTranslator {
     chat_id: String,
     model: String,
@@ -988,7 +992,8 @@ impl ResponsesStreamToChatTranslator {
                 let delta_obj = if tc.id.is_none() {
                     tc.id = item_id.clone();
                     tc.tool_type = Some("function".to_string());
-                    let delta = ChatDelta {
+
+                    ChatDelta {
                         role: None,
                         content: None,
                         tool_calls: Some(vec![ToolCallDelta {
@@ -1002,10 +1007,9 @@ impl ResponsesStreamToChatTranslator {
                         }]),
                         refusal: None,
                         reasoning_content: None,
-                    };
-                    delta
+                    }
                 } else {
-                    let delta = ChatDelta {
+                    ChatDelta {
                         role: None,
                         content: None,
                         tool_calls: Some(vec![ToolCallDelta {
@@ -1019,8 +1023,7 @@ impl ResponsesStreamToChatTranslator {
                         }]),
                         refusal: None,
                         reasoning_content: None,
-                    };
-                    delta
+                    }
                 };
 
                 chunks.push(self.make_chunk(Some(delta_obj), None));
@@ -1035,58 +1038,56 @@ impl ResponsesStreamToChatTranslator {
                 };
                 chunks.push(self.make_chunk(Some(delta_obj), None));
             }
-            ResponsesStreamEvent::ResponseCompleted { response, .. } => {
-                if !self.finished {
-                    self.finished = true;
+            ResponsesStreamEvent::ResponseCompleted { response, .. } if !self.finished => {
+                self.finished = true;
 
-                    let finish_reason = match response.status.as_deref() {
-                        Some("incomplete") => "length",
-                        _ => "stop",
-                    };
+                let finish_reason = match response.status.as_deref() {
+                    Some("incomplete") => "length",
+                    _ => "stop",
+                };
 
-                    let usage = response
-                        .usage
-                        .as_ref()
-                        .map(|u| crate::types::chat::ChatUsage {
-                            prompt_tokens: u.input_tokens,
-                            completion_tokens: u.output_tokens,
-                            total_tokens: u.total_tokens,
-                            prompt_tokens_details: u.input_tokens_details.as_ref().map(|d| {
-                                crate::types::chat::PromptTokensDetails {
-                                    cached_tokens: d.cached_tokens,
-                                }
-                            }),
-                            completion_tokens_details: u.output_tokens_details.as_ref().map(|d| {
-                                crate::types::chat::CompletionTokensDetails {
-                                    reasoning_tokens: d.reasoning_tokens,
-                                }
-                            }),
-                        });
+                let usage = response
+                    .usage
+                    .as_ref()
+                    .map(|u| crate::types::chat::ChatUsage {
+                        prompt_tokens: u.input_tokens,
+                        completion_tokens: u.output_tokens,
+                        total_tokens: u.total_tokens,
+                        prompt_tokens_details: u.input_tokens_details.as_ref().map(|d| {
+                            crate::types::chat::PromptTokensDetails {
+                                cached_tokens: d.cached_tokens,
+                            }
+                        }),
+                        completion_tokens_details: u.output_tokens_details.as_ref().map(|d| {
+                            crate::types::chat::CompletionTokensDetails {
+                                reasoning_tokens: d.reasoning_tokens,
+                            }
+                        }),
+                    });
 
-                    let final_chunk = ChatDelta {
-                        role: None,
-                        content: None,
-                        tool_calls: None,
-                        refusal: None,
-                        reasoning_content: None,
-                    };
+                let final_chunk = ChatDelta {
+                    role: None,
+                    content: None,
+                    tool_calls: None,
+                    refusal: None,
+                    reasoning_content: None,
+                };
 
-                    chunks.push(serde_json::json!({
-                        "id": self.chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": self.created,
-                        "model": self.model,
-                        "choices": [{
-                            "index": 0,
-                            "delta": final_chunk,
-                            "finish_reason": finish_reason,
-                        }],
-                        "usage": usage,
-                    }));
+                chunks.push(serde_json::json!({
+                    "id": self.chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": self.created,
+                    "model": self.model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": final_chunk,
+                        "finish_reason": finish_reason,
+                    }],
+                    "usage": usage,
+                }));
 
-                    // Send [DONE]
-                    chunks.push(serde_json::Value::String("[DONE]".to_string()));
-                }
+                // Send [DONE]
+                chunks.push(serde_json::Value::String("[DONE]".to_string()));
             }
             _ => {}
         }

@@ -48,7 +48,7 @@ pub fn convert_responses_to_chat(
                 ResponsesInputItem::Message {
                     role,
                     content,
-                    id,
+                    id: _,
                     name,
                 } => {
                     let mapped_role = if role == "developer" { "system" } else { role };
@@ -465,7 +465,7 @@ pub fn convert_responses_to_chat_response(
 ) -> ChatCompletionsResponse {
     let mut text_parts: Vec<String> = Vec::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
-    let mut refusal: Option<String> = None;
+    let refusal: Option<String> = None;
     let mut finish_reason = "stop";
     let mut reasoning_content: Option<String> = None;
 
@@ -494,7 +494,7 @@ pub fn convert_responses_to_chat_response(
 
             ResponsesOutputItem::FunctionCall {
                 id,
-                call_id,
+                call_id: _,
                 name,
                 arguments,
                 ..

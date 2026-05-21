@@ -12,6 +12,7 @@ use crate::types::responses::*;
 ///   supports the `developer` role).
 /// * `thinking` is always set to `None`.
 /// * Tools use `ResponsesTool::get_function()` for the nested/flat format.
+#[allow(dead_code)]
 pub fn convert_responses_to_chat(responses: &ResponsesRequest) -> ChatCompletionsRequest {
     let mut messages = Vec::new();
 
@@ -163,6 +164,7 @@ pub fn convert_responses_to_chat(responses: &ResponsesRequest) -> ChatCompletion
 ///
 /// Assistant text content becomes an `output` `Message` item.  Tool calls
 /// become separate `function_call` output items.
+#[allow(dead_code)]
 pub fn convert_chat_to_responses_response(
     chat: &ChatCompletionsResponse,
     model: &str,
@@ -240,6 +242,7 @@ pub fn convert_chat_to_responses_response(
 ///
 /// The first `system` message becomes `instructions`.  Subsequent system
 /// messages and `developer` messages are kept as input items.
+#[allow(dead_code)]
 pub fn convert_chat_to_responses(chat: &ChatCompletionsRequest) -> ResponsesRequest {
     let mut input_items = Vec::new();
     let mut instructions: Option<String> = None;
@@ -373,6 +376,7 @@ pub fn convert_chat_to_responses(chat: &ChatCompletionsRequest) -> ResponsesRequ
 /// All output items are aggregated into a single `assistant` choice: text
 /// from `Message` items, tool calls from `function_call` items, and
 /// reasoning text from `reasoning` items.
+#[allow(dead_code)]
 pub fn convert_responses_to_chat_response(
     responses: &ResponsesResponse,
     model: &str,
@@ -507,6 +511,7 @@ pub fn convert_responses_to_chat_response(
 // ---------------------------------------------------------------------------
 
 /// Convert Responses content parts into Chat content.
+#[allow(dead_code)]
 fn responses_content_to_chat_content(
     content: &Option<Vec<ResponsesContentPart>>,
 ) -> Option<ChatContent> {
@@ -553,6 +558,7 @@ fn responses_content_to_chat_content(
 }
 
 /// Convert a Chat message into a Responses input item (Message variant).
+#[allow(dead_code)]
 fn chat_message_to_input_item(msg: &ChatMessage) -> ResponsesInputItem {
     let parts = chat_content_to_responses_parts(&msg.content);
     ResponsesInputItem::Message {
@@ -564,6 +570,7 @@ fn chat_message_to_input_item(msg: &ChatMessage) -> ResponsesInputItem {
 }
 
 /// Convert Chat content into Responses content parts (for input).
+#[allow(dead_code)]
 fn chat_content_to_responses_parts(content: &Option<ChatContent>) -> Vec<ResponsesContentPart> {
     match content {
         Some(ChatContent::String(s)) => {
@@ -587,6 +594,7 @@ fn chat_content_to_responses_parts(content: &Option<ChatContent>) -> Vec<Respons
 }
 
 /// Extract a text string from any Responses content part variant.
+#[allow(dead_code)]
 fn extract_text_from_content_part(part: &ResponsesContentPart) -> Option<String> {
     match part {
         ResponsesContentPart::InputText { text }
@@ -597,6 +605,7 @@ fn extract_text_from_content_part(part: &ResponsesContentPart) -> Option<String>
     }
 }
 
+#[allow(dead_code)]
 fn map_finish_reason_to_status(reason: Option<&str>) -> String {
     match reason {
         Some("stop") | Some("tool_calls") => "completed",
@@ -606,6 +615,7 @@ fn map_finish_reason_to_status(reason: Option<&str>) -> String {
     .to_string()
 }
 
+#[allow(dead_code)]
 fn map_status_to_finish_reason(status: &str) -> String {
     match status {
         "completed" => "stop",

@@ -14,19 +14,16 @@ pub enum UpstreamFormat {
 /// Vendor-specific adapter behavior (defaults to auto-detect from base_url)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum UpstreamVendor {
     DeepSeek,
     OpenAI,
     Anthropic,
+    #[default]
     Auto,
 }
 
-impl Default for UpstreamVendor {
-    fn default() -> Self {
-        UpstreamVendor::Auto
-    }
-}
-
+#[allow(dead_code)]
 impl UpstreamVendor {
     pub fn resolve(&self, base_url: &str) -> UpstreamVendor {
         match self {
@@ -134,6 +131,7 @@ pub struct RuntimeConfig {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FallbackUpstream {
     pub base_url: String,
     pub format: UpstreamFormat,
@@ -163,6 +161,7 @@ impl Default for RuntimeConfig {
 }
 
 /// Load config from file, env vars, and CLI overrides
+#[allow(clippy::too_many_arguments)]
 pub fn load_config(
     config_path: Option<&PathBuf>,
     cli_base_url: Option<&str>,
@@ -278,8 +277,8 @@ pub fn load_config(
         config.cors = false;
     }
     config.log_http = cli_log_http || config.log_http;
-    if let Some(ref v) = cli_vendor {
-        config.vendor = match *v {
+    if let Some(v) = cli_vendor {
+        config.vendor = match v {
             "deepseek" => UpstreamVendor::DeepSeek,
             "openai" => UpstreamVendor::OpenAI,
             "anthropic" => UpstreamVendor::Anthropic,

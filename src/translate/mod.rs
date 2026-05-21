@@ -7,6 +7,7 @@ use crate::types::chat::ChatCompletionsRequest;
 use crate::types::responses::ResponsesRequest;
 
 /// Dispatch Responses→Chat conversion to the correct vendor module
+#[allow(dead_code)]
 pub fn convert_responses_to_chat(
     responses: &ResponsesRequest,
     format: &UpstreamFormat,
