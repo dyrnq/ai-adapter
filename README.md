@@ -70,7 +70,7 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 | `--model`           | `UPSTREAM_MODEL`    | —             | Default model override                       |
 | `-p, --port`        | `PORT`              | `9090`        | Server port                                  |
 | `--host`            | `HOST`              | `0.0.0.0`     | Server host                                  |
-| `-l, --log-level`   | `RUST_LOG`          | `info`        | `trace`, `debug`, `info`, `warn`, `error`    |
+| `--log`             | `RUST_LOG`          | `info`        | `trace`, `debug`, `info`, `warn`, `error`    |
 | `--log-file`        | —                   | —             | Write JSON logs to file                      |
 | `--log-http`        | —                   | —             | Log HTTP request/response bodies             |
 | `--drop-images`     | —                   | —             | Strip images from requests                   |

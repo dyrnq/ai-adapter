@@ -42,7 +42,7 @@ struct Cli {
     host: Option<String>,
 
     /// Log level (trace, debug, info, warn, error)
-    #[arg(short = 'l', long = "log-level", env = "RUST_LOG")]
+    #[arg(long = "log", env = "RUST_LOG")]
     log_level: Option<String>,
 
     /// Write logs to file in addition to stderr
