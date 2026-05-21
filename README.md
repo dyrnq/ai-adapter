@@ -25,7 +25,7 @@ Codex / Client          AI Adapter :9090          Upstream
 - **DeepSeek Plan A/B**:
   - **Plan A** (Chat): `thinking: disabled`, `developer → system` role mapping, reasoning cache for multi-turn
   - **Plan B** (Anthropic): tool_use/tool_result merging, native thinking support
-- **Reasoning cache**: On-disk `redb` cache at `~/.ai-adapter/reasoning.redb` for multi-turn thinking compliance
+- **Reasoning cache**: On-disk `redb` cache at `~/.ai-adapter/state.redb` for multi-turn thinking compliance
 - **Tool calling**: Full function call streaming, flat & nested tool format support (`get_function()`)
 - **Compaction**: `POST /v1/responses/compact` for Codex CLI context management
 - **Config-driven**: YAML/JSON config files, environment variables, CLI flags
@@ -48,6 +48,16 @@ cargo build --release
 
 Point Codex at `http://127.0.0.1:9090/v1`.
 
+## Subcommands
+
+```bash
+# Show version info
+./target/release/ai-adapter version
+
+# List active sessions (requires running server)
+./target/release/ai-adapter session ls
+```
+
 ## CLI Options
 
 | Flag                | Env                 | Default       | Description                                  |
@@ -55,7 +65,7 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 | `-c, --config`      | —                   | —             | Config file (YAML/JSON)                      |
 | `--base-url`        | `UPSTREAM_BASE_URL` | —             | Upstream API base URL                        |
 | `--upstream-format` | `UPSTREAM_FORMAT`   | `openai-chat` | `anthropic`, `openai-chat`, `responses`      |
-| `--vendor`          | —                   | `auto`        | `deepseek`, `openai`, `anthropic`, `auto`    |
+| `--vendor`          | —                   | `auto`        | `deepseek`, `openai`, `anthropic`, `auto`    |          | —                   | `auto`        | `deepseek`, `openai`, `anthropic`, `auto`    |
 | `--apikey`          | `UPSTREAM_API_KEY`  | —             | Upstream API key                             |
 | `--model`           | `UPSTREAM_MODEL`    | —             | Default model override                       |
 | `-p, --port`        | `PORT`              | `9090`        | Server port                                  |
@@ -75,6 +85,7 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 | `/v1/responses/compact` | POST   | Context compaction for Codex CLI  |
 | `/v1/models`            | GET    | Pass-through                      |
 | `/v1/*`                 | \*     | Catch-all pass-through            |
+| `/__/session`           | GET    | List active sessions (JSON)       |
 | `/health`               | GET    | Health check                      |
 
 ## Vendor Behavior
