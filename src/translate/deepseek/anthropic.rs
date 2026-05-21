@@ -378,12 +378,12 @@ fn convert_message_content(
 
 fn convert_content_part(part: &ResponsesContentPart) -> Option<AnthropicContentBlock> {
     match part {
-        ResponsesContentPart::InputText { text } | ResponsesContentPart::Text { text } => {
-            Some(AnthropicContentBlock::Text {
-                text: text.clone(),
-                cache_control: None,
-            })
-        }
+        ResponsesContentPart::InputText { text }
+        | ResponsesContentPart::Text { text }
+        | ResponsesContentPart::OutputText { text } => Some(AnthropicContentBlock::Text {
+            text: text.clone(),
+            cache_control: None,
+        }),
         ResponsesContentPart::InputImage { image_url, .. } => {
             image_url.as_ref().and_then(|url| convert_image_url(url))
         }
