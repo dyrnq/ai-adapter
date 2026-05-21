@@ -181,8 +181,8 @@ pub fn load_config(
     // 1. Load from config file if provided
     if let Some(path) = config_path {
         let content = std::fs::read_to_string(path)?;
-        let app_config: AppConfig = serde_yaml::from_str(&content)
-            .or_else(|_| serde_json::from_str(&content))?;
+        let app_config: AppConfig =
+            serde_yaml::from_str(&content).or_else(|_| serde_json::from_str(&content))?;
 
         // Apply server config
         if let Some(server) = &app_config.server {
@@ -192,11 +192,9 @@ pub fn load_config(
 
         // Apply global headers
         if let Some(headers) = &app_config.headers {
-            config.extra_headers.extend(
-                headers
-                    .iter()
-                    .map(|(k, v)| (k.to_lowercase(), v.clone())),
-            );
+            config
+                .extra_headers
+                .extend(headers.iter().map(|(k, v)| (k.to_lowercase(), v.clone())));
         }
 
         // Apply current upstream config

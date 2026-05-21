@@ -19,7 +19,12 @@ impl ReasoningCache {
         Self { db }
     }
 
-    pub async fn save(&self, session_id: &str, response_id: &str, reasoning: &str) -> anyhow::Result<()> {
+    pub async fn save(
+        &self,
+        session_id: &str,
+        response_id: &str,
+        reasoning: &str,
+    ) -> anyhow::Result<()> {
         let key = compose_key(session_id, response_id);
         let db = self.db.read().await;
         let write_txn = db.begin_write()?;
@@ -30,7 +35,9 @@ impl ReasoningCache {
         write_txn.commit()?;
         tracing::debug!(
             "ReasoningCache: saved {} bytes for session_id={} response_id={}",
-            reasoning.len(), session_id, response_id
+            reasoning.len(),
+            session_id,
+            response_id
         );
         Ok(())
     }

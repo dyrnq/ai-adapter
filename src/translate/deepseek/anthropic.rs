@@ -40,7 +40,9 @@ pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> Anthropic
             .map(|f| AnthropicTool {
                 name: f.name,
                 description: f.description,
-                input_schema: f.parameters.unwrap_or(Value::Object(serde_json::Map::new())),
+                input_schema: f
+                    .parameters
+                    .unwrap_or(Value::Object(serde_json::Map::new())),
                 cache_control: None,
             })
             .collect()
@@ -52,9 +54,15 @@ pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> Anthropic
         .as_ref()
         .and_then(|r| r.effort.as_deref())
     {
-        Some("low") => Some(AnthropicThinkingConfig::Enabled { budget_tokens: 1024 }),
-        Some("medium") => Some(AnthropicThinkingConfig::Enabled { budget_tokens: 4096 }),
-        Some("high") => Some(AnthropicThinkingConfig::Enabled { budget_tokens: 8192 }),
+        Some("low") => Some(AnthropicThinkingConfig::Enabled {
+            budget_tokens: 1024,
+        }),
+        Some("medium") => Some(AnthropicThinkingConfig::Enabled {
+            budget_tokens: 4096,
+        }),
+        Some("high") => Some(AnthropicThinkingConfig::Enabled {
+            budget_tokens: 8192,
+        }),
         _ => Some(AnthropicThinkingConfig::Disabled),
     };
 
@@ -93,11 +101,14 @@ fn map_tool_choice(tc: &Option<Value>) -> Option<AnthropicToolChoice> {
         Some(Value::String(s)) if s == "auto" => Some(AnthropicToolChoice::Auto),
         Some(Value::String(s)) if s == "required" || s == "any" => Some(AnthropicToolChoice::Any),
         Some(Value::Object(obj)) => {
-            if let Some(name) = obj.get("function")
+            if let Some(name) = obj
+                .get("function")
                 .and_then(|f| f.get("name"))
                 .and_then(|n| n.as_str())
             {
-                Some(AnthropicToolChoice::Tool { name: name.to_string() })
+                Some(AnthropicToolChoice::Tool {
+                    name: name.to_string(),
+                })
             } else {
                 None
             }
@@ -127,18 +138,14 @@ pub fn convert_anthropic_to_responses(
                 // Append to the last Message item if present, otherwise start one.
                 match output.last_mut() {
                     Some(ResponsesOutputItem::Message { content, .. }) => {
-                        content.push(ResponsesContentPart::OutputText {
-                            text: text.clone(),
-                        });
+                        content.push(ResponsesContentPart::OutputText { text: text.clone() });
                     }
                     _ => {
                         item_id_counter += 1;
                         output.push(ResponsesOutputItem::Message {
                             id: format!("msg_{}", item_id_counter),
                             role: Some("assistant".to_string()),
-                            content: vec![ResponsesContentPart::OutputText {
-                                text: text.clone(),
-                            }],
+                            content: vec![ResponsesContentPart::OutputText { text: text.clone() }],
                             status: Some("completed".to_string()),
                         });
                     }
@@ -262,8 +269,8 @@ pub fn build_tool_use_block(
 /// Tracks consecutive FunctionCall / FunctionCallOutput items so they can be
 /// merged into a single message.
 enum PendingGroup {
-    FunctionCalls(Vec<(String, String, String)>),      // (call_id, name, arguments)
-    FunctionCallOutputs(Vec<(String, String)>),         // (call_id, output)
+    FunctionCalls(Vec<(String, String, String)>), // (call_id, name, arguments)
+    FunctionCallOutputs(Vec<(String, String)>),   // (call_id, output)
 }
 
 /// Build a `Vec<AnthropicMessage>` from `ResponsesInputItem` items, merging
@@ -301,20 +308,20 @@ fn build_anthropic_messages(items: &[ResponsesInputItem]) -> Vec<AnthropicMessag
                     )]));
                 }
             },
-            ResponsesInputItem::FunctionCallOutput { call_id, output, .. } => {
-                match &mut pending {
-                    Some(PendingGroup::FunctionCallOutputs(outputs)) => {
-                        outputs.push((call_id.clone(), output.clone()));
-                    }
-                    _ => {
-                        flush_pending(&mut pending, &mut messages);
-                        pending = Some(PendingGroup::FunctionCallOutputs(vec![(
-                            call_id.clone(),
-                            output.clone(),
-                        )]));
-                    }
+            ResponsesInputItem::FunctionCallOutput {
+                call_id, output, ..
+            } => match &mut pending {
+                Some(PendingGroup::FunctionCallOutputs(outputs)) => {
+                    outputs.push((call_id.clone(), output.clone()));
                 }
-            }
+                _ => {
+                    flush_pending(&mut pending, &mut messages);
+                    pending = Some(PendingGroup::FunctionCallOutputs(vec![(
+                        call_id.clone(),
+                        output.clone(),
+                    )]));
+                }
+            },
         }
     }
     flush_pending(&mut pending, &mut messages);
@@ -508,10 +515,7 @@ fn merge_message_into(target: &mut AnthropicMessage, source: AnthropicMessage) {
         ) => {
             target_blocks.extend(source_blocks);
         }
-        (
-            AnthropicMessageContent::Blocks(target_blocks),
-            AnthropicMessageContent::String(text),
-        ) => {
+        (AnthropicMessageContent::Blocks(target_blocks), AnthropicMessageContent::String(text)) => {
             target_blocks.push(AnthropicContentBlock::Text {
                 text,
                 cache_control: None,
@@ -609,11 +613,7 @@ mod tests {
 
     #[test]
     fn build_tool_use_block_invalid_json() {
-        let block = build_tool_use_block(
-            "call_1".into(),
-            "f".into(),
-            "not-json".into(),
-        );
+        let block = build_tool_use_block("call_1".into(), "f".into(), "not-json".into());
         match block {
             AnthropicContentBlock::ToolUse { input, .. } => {
                 assert!(input.is_object());
@@ -847,8 +847,14 @@ mod tests {
         assert_eq!(result.messages[0].role, "user"); // not "assistant" first
         if let AnthropicMessageContent::Blocks(ref blocks) = result.messages[0].content {
             assert_eq!(blocks.len(), 2);
-            assert!(matches!(blocks[0], AnthropicContentBlock::ToolResult { .. }));
-            assert!(matches!(blocks[1], AnthropicContentBlock::ToolResult { .. }));
+            assert!(matches!(
+                blocks[0],
+                AnthropicContentBlock::ToolResult { .. }
+            ));
+            assert!(matches!(
+                blocks[1],
+                AnthropicContentBlock::ToolResult { .. }
+            ));
         } else {
             panic!("expected blocks");
         }
@@ -934,7 +940,10 @@ mod tests {
         assert_eq!(result.output.len(), 1);
         if let ResponsesOutputItem::Message { content, role, .. } = &result.output[0] {
             assert_eq!(role.as_deref(), Some("assistant"));
-            assert!(matches!(content[0], ResponsesContentPart::OutputText { .. }));
+            assert!(matches!(
+                content[0],
+                ResponsesContentPart::OutputText { .. }
+            ));
         } else {
             panic!("expected Message");
         }
@@ -1050,9 +1059,7 @@ mod tests {
             id: "msg_1".into(),
             response_type: "message".into(),
             role: "assistant".into(),
-            content: vec![AnthropicContentBlock::RedactedThinking {
-                data: "xyz".into(),
-            }],
+            content: vec![AnthropicContentBlock::RedactedThinking { data: "xyz".into() }],
             model: "claude-sonnet-4-20250514".into(),
             stop_reason: Some("end_turn".into()),
             stop_sequence: None,
@@ -1066,9 +1073,7 @@ mod tests {
         let result = convert_anthropic_to_responses(&resp, "deepseek");
         match &result.output[0] {
             ResponsesOutputItem::Reasoning { content, .. } => {
-                assert!(content
-                    .as_ref()
-                    .unwrap()[0]
+                assert!(content.as_ref().unwrap()[0]
                     .to_text()
                     .starts_with("[redacted:"));
             }
@@ -1155,9 +1160,7 @@ mod tests {
             input: Some(vec![
                 ResponsesInputItem::Message {
                     role: "user".into(),
-                    content: Some(vec![ResponsesContentPart::InputText {
-                        text: "go".into(),
-                    }]),
+                    content: Some(vec![ResponsesContentPart::InputText { text: "go".into() }]),
                     id: None,
                     name: None,
                 },

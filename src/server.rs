@@ -24,15 +24,13 @@ use crate::stream::sse::{
     AnthropicStreamTranslator, ChatStreamToResponsesTranslator, ResponsesStreamToChatTranslator,
 };
 use crate::translate::{
-    convert_anthropic_to_responses,
-    convert_chat_to_responses,
-    convert_chat_to_responses_response,
-    convert_for_deepseek,
-    convert_responses_to_anthropic,
-    chat_resp_to_responses,
+    chat_resp_to_responses, convert_anthropic_to_responses, convert_chat_to_responses,
+    convert_chat_to_responses_response, convert_for_deepseek, convert_responses_to_anthropic,
 };
 use crate::types::chat::ChatCompletionsRequest;
-use crate::types::responses::{CompactRequest, CompactResponse, ResponsesRequest, ResponsesStreamEvent};
+use crate::types::responses::{
+    CompactRequest, CompactResponse, ResponsesRequest, ResponsesStreamEvent,
+};
 
 /// Shared application state
 #[derive(Clone)]
@@ -44,13 +42,22 @@ pub struct AppState {
 }
 
 /// Build the HTTP router
-pub fn build_router(config: RuntimeConfig, reason_cache: ReasoningCache, session_store: SessionStore) -> Router {
+pub fn build_router(
+    config: RuntimeConfig,
+    reason_cache: ReasoningCache,
+    session_store: SessionStore,
+) -> Router {
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .expect("Failed to create HTTP client");
 
-    let state = AppState { config, client, reason_cache, session_store };
+    let state = AppState {
+        config,
+        client,
+        reason_cache,
+        session_store,
+    };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -66,9 +73,7 @@ pub fn build_router(config: RuntimeConfig, reason_cache: ReasoningCache, session
 
     // HTTP request/response logging via TraceLayer
     let trace_layer = TraceLayer::new_for_http()
-        .make_span_with(
-            DefaultMakeSpan::new().level(Level::INFO),
-        )
+        .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
         .on_response(
             DefaultOnResponse::new()
                 .level(Level::INFO)
@@ -168,18 +173,15 @@ fn build_compact_prompt(req: &CompactRequest) -> String {
                     name, arguments
                 ));
             }
-            crate::types::responses::ResponsesInputItem::FunctionCallOutput {
-                output, ..
-            } => {
+            crate::types::responses::ResponsesInputItem::FunctionCallOutput { output, .. } => {
                 parts.push(format!("[tool output]: {}", output));
             }
         }
     }
 
-    let instructions = req
-        .instructions
-        .as_deref()
-        .unwrap_or("Summarize the conversation above, preserving key decisions, code changes, and context.");
+    let instructions = req.instructions.as_deref().unwrap_or(
+        "Summarize the conversation above, preserving key decisions, code changes, and context.",
+    );
 
     format!(
         "Please summarize the following conversation. {}\n\nConversation:\n{}",
@@ -260,15 +262,13 @@ async fn compact_via_chat(
                     crate::types::responses::ResponsesOutputCompactItem::Message {
                         id: format!("msg_{}", uuid::Uuid::new_v4()),
                         role: "assistant".to_string(),
-                        content: vec![
-                            crate::types::responses::ResponsesContentPart::OutputText {
-                                text: if summary.is_empty() {
-                                    "Conversation context preserved.".to_string()
-                                } else {
-                                    summary.to_string()
-                                },
+                        content: vec![crate::types::responses::ResponsesContentPart::OutputText {
+                            text: if summary.is_empty() {
+                                "Conversation context preserved.".to_string()
+                            } else {
+                                summary.to_string()
                             },
-                        ],
+                        }],
                         status: "completed".to_string(),
                     },
                 ],
@@ -358,15 +358,13 @@ async fn compact_via_anthropic(
                     crate::types::responses::ResponsesOutputCompactItem::Message {
                         id: format!("msg_{}", uuid::Uuid::new_v4()),
                         role: "assistant".to_string(),
-                        content: vec![
-                            crate::types::responses::ResponsesContentPart::OutputText {
-                                text: if summary.is_empty() {
-                                    "Conversation context preserved.".to_string()
-                                } else {
-                                    summary.to_string()
-                                },
+                        content: vec![crate::types::responses::ResponsesContentPart::OutputText {
+                            text: if summary.is_empty() {
+                                "Conversation context preserved.".to_string()
+                            } else {
+                                summary.to_string()
                             },
-                        ],
+                        }],
                         status: "completed".to_string(),
                     },
                 ],
@@ -393,11 +391,9 @@ fn make_noop_compact(_req: &CompactRequest) -> Response {
             crate::types::responses::ResponsesOutputCompactItem::Message {
                 id: format!("msg_{}", uuid::Uuid::new_v4()),
                 role: "assistant".to_string(),
-                content: vec![
-                    crate::types::responses::ResponsesContentPart::OutputText {
-                        text: "Conversation context preserved (no-op compact).".to_string(),
-                    },
-                ],
+                content: vec![crate::types::responses::ResponsesContentPart::OutputText {
+                    text: "Conversation context preserved (no-op compact).".to_string(),
+                }],
                 status: "completed".to_string(),
             },
         ],
@@ -427,7 +423,8 @@ async fn handle_chat_completions(
         Err(e) => {
             return (
                 StatusCode::BAD_REQUEST,
-                serde_json::json!({"error": {"message": format!("Invalid request: {}", e)}}).to_string(),
+                serde_json::json!({"error": {"message": format!("Invalid request: {}", e)}})
+                    .to_string(),
             )
                 .into_response();
         }
@@ -475,7 +472,8 @@ async fn handle_chat_completions(
             tracing::error!("Upstream request failed: {}", e);
             return (
                 StatusCode::BAD_GATEWAY,
-                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}}).to_string(),
+                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
+                    .to_string(),
             )
                 .into_response();
         }
@@ -492,7 +490,9 @@ async fn handle_chat_completions(
     if is_stream {
         // Stream: convert Responses SSE -> Chat SSE
         let stream = upstream_resp.bytes_stream();
-        let (tx, rx) = tokio::sync::mpsc::channel::<std::result::Result<axum::response::sse::Event, std::convert::Infallible>>(32);
+        let (tx, rx) = tokio::sync::mpsc::channel::<
+            std::result::Result<axum::response::sse::Event, std::convert::Infallible>,
+        >(32);
 
         let model = upstream_model.clone();
         tokio::spawn(async move {
@@ -530,19 +530,31 @@ async fn handle_chat_completions(
                                             ""
                                         };
                                         if let Ok(event) =
-                                            serde_json::from_str::<crate::types::responses::ResponsesStreamEvent>(data)
+                                            serde_json::from_str::<
+                                                crate::types::responses::ResponsesStreamEvent,
+                                            >(data)
                                         {
                                             let chunks = translator.process_event(&event);
                                             for chunk_json in chunks {
-                                                if chunk_json == Value::String("[DONE]".to_string()) {
+                                                if chunk_json == Value::String("[DONE]".to_string())
+                                                {
                                                     let _ = tx
-                                                        .send(Ok(axum::response::sse::Event::default()
-                                                            .data("[DONE]")))
+                                                        .send(Ok(
+                                                            axum::response::sse::Event::default()
+                                                                .data("[DONE]"),
+                                                        ))
                                                         .await;
                                                 } else {
                                                     let _ = tx
-                                                        .send(Ok(axum::response::sse::Event::default()
-                                                            .data(serde_json::to_string(&chunk_json).unwrap_or_default())))
+                                                        .send(Ok(
+                                                            axum::response::sse::Event::default()
+                                                                .data(
+                                                                    serde_json::to_string(
+                                                                        &chunk_json,
+                                                                    )
+                                                                    .unwrap_or_default(),
+                                                                ),
+                                                        ))
                                                         .await;
                                                 }
                                             }
@@ -618,7 +630,8 @@ async fn handle_responses(
         Err(e) => {
             return (
                 StatusCode::BAD_REQUEST,
-                serde_json::json!({"error": {"message": format!("Invalid request: {}", e)}}).to_string(),
+                serde_json::json!({"error": {"message": format!("Invalid request: {}", e)}})
+                    .to_string(),
             )
                 .into_response();
         }
@@ -644,11 +657,25 @@ async fn handle_responses(
         }
         UpstreamFormat::OpenAiChat => {
             // Convert to Chat Completions
-            handle_responses_via_chat(&state, &responses_req, is_stream, api_key, Some(session_id.clone())).await
+            handle_responses_via_chat(
+                &state,
+                &responses_req,
+                is_stream,
+                api_key,
+                session_id.clone(),
+            )
+            .await
         }
         UpstreamFormat::Anthropic => {
             // Convert to Anthropic Messages
-            handle_responses_via_anthropic(&state, &responses_req, is_stream, api_key, Some(session_id.clone())).await
+            handle_responses_via_anthropic(
+                &state,
+                &responses_req,
+                is_stream,
+                api_key,
+                session_id.clone(),
+            )
+            .await
         }
     }
 }
@@ -690,7 +717,8 @@ async fn handle_responses_passthrough(
                 Err(e) => {
                     return (
                         StatusCode::BAD_GATEWAY,
-                        serde_json::json!({"error": {"message": format!("Read error: {}", e)}}).to_string(),
+                        serde_json::json!({"error": {"message": format!("Read error: {}", e)}})
+                            .to_string(),
                     )
                         .into_response();
                 }
@@ -725,7 +753,11 @@ async fn handle_responses_via_chat(
         let sid = session_id.as_deref().unwrap_or("unknown");
         match state.reason_cache.get(sid, prev_id).await {
             Ok(Some(r)) => {
-                tracing::debug!("Injected {} bytes of reasoning from previous_response_id={}", r.len(), prev_id);
+                tracing::debug!(
+                    "Injected {} bytes of reasoning from previous_response_id={}",
+                    r.len(),
+                    prev_id
+                );
                 Some(r)
             }
             Ok(None) => None,
@@ -754,7 +786,10 @@ async fn handle_responses_via_chat(
     }
 
     let body_json = serde_json::to_string(&chat_req).unwrap_or_default();
-    tracing::debug!("Responses->Chat body: {}", &body_json[..body_json.len().min(2000)]);
+    tracing::debug!(
+        "Responses->Chat body: {}",
+        &body_json[..body_json.len().min(2000)]
+    );
 
     let upstream_resp = match state
         .client
@@ -768,7 +803,8 @@ async fn handle_responses_via_chat(
         Err(e) => {
             return (
                 StatusCode::BAD_GATEWAY,
-                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}}).to_string(),
+                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
+                    .to_string(),
             )
                 .into_response();
         }
@@ -785,7 +821,11 @@ async fn handle_responses_via_chat(
     // Check for upstream errors before attempting to stream/parse
     if !upstream_status.is_success() {
         let error_body = upstream_resp.text().await.unwrap_or_default();
-        tracing::error!("Upstream returned {}: {}", upstream_status.as_u16(), &error_body);
+        tracing::error!(
+            "Upstream returned {}: {}",
+            upstream_status.as_u16(),
+            &error_body
+        );
         return (
             StatusCode::BAD_GATEWAY,
             serde_json::json!({"error": {"message": format!("Upstream error {}: {}", upstream_status.as_u16(), error_body)}}).to_string(),
@@ -796,7 +836,9 @@ async fn handle_responses_via_chat(
     if is_stream {
         // Stream: convert Chat SSE -> Responses SSE
         let stream = upstream_resp.bytes_stream();
-        let (tx, rx) = tokio::sync::mpsc::channel::<std::result::Result<axum::response::sse::Event, std::convert::Infallible>>(64);
+        let (tx, rx) = tokio::sync::mpsc::channel::<
+            std::result::Result<axum::response::sse::Event, std::convert::Infallible>,
+        >(64);
 
         let model = upstream_model.clone();
         let reason_cache = state.reason_cache.clone();
@@ -840,9 +882,9 @@ async fn handle_responses_via_chat(
                                         } else {
                                             ""
                                         };
-                                        if let Ok(chunk_json) = serde_json::from_str::<Value>(data) {
-                                            let events =
-                                                translator.process_chunk(&chunk_json);
+                                        if let Ok(chunk_json) = serde_json::from_str::<Value>(data)
+                                        {
+                                            let events = translator.process_chunk(&chunk_json);
                                             for event in events {
                                                 send_sse(&tx, &event).await;
                                             }
@@ -871,7 +913,10 @@ async fn handle_responses_via_chat(
             // Save reasoning content to cache for future multi-turn requests
             if !translator.reasoning_content.is_empty() {
                 let sid = session_id_for_save.as_deref().unwrap_or("unknown");
-                if let Err(e) = reason_cache.save(sid, &translator.response_id, &translator.reasoning_content).await {
+                if let Err(e) = reason_cache
+                    .save(sid, &translator.response_id, &translator.reasoning_content)
+                    .await
+                {
                     tracing::error!("Failed to save reasoning cache: {}", e);
                 }
             }
@@ -892,17 +937,19 @@ async fn handle_responses_via_chat(
             }
         };
 
-        let chat_resp: crate::types::chat::ChatCompletionsResponse =
-            match serde_json::from_value(upstream_body) {
-                Ok(r) => r,
-                Err(e) => {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        serde_json::json!({"error": {"message": format!("Failed to parse: {}", e)}}).to_string(),
-                    )
-                        .into_response();
-                }
-            };
+        let chat_resp: crate::types::chat::ChatCompletionsResponse = match serde_json::from_value(
+            upstream_body,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    serde_json::json!({"error": {"message": format!("Failed to parse: {}", e)}})
+                        .to_string(),
+                )
+                    .into_response();
+            }
+        };
 
         let responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
         (
@@ -955,7 +1002,8 @@ async fn handle_responses_via_anthropic(
         Err(e) => {
             return (
                 StatusCode::BAD_GATEWAY,
-                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}}).to_string(),
+                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
+                    .to_string(),
             )
                 .into_response();
         }
@@ -972,7 +1020,11 @@ async fn handle_responses_via_anthropic(
     // Check for upstream errors before attempting to stream/parse
     if !upstream_status.is_success() {
         let error_body = upstream_resp.text().await.unwrap_or_default();
-        tracing::error!("Upstream returned {}: {}", upstream_status.as_u16(), &error_body);
+        tracing::error!(
+            "Upstream returned {}: {}",
+            upstream_status.as_u16(),
+            &error_body
+        );
         return (
             StatusCode::BAD_GATEWAY,
             serde_json::json!({"error": {"message": format!("Upstream error {}: {}", upstream_status.as_u16(), error_body)}}).to_string(),
@@ -982,7 +1034,9 @@ async fn handle_responses_via_anthropic(
 
     if is_stream {
         let stream = upstream_resp.bytes_stream();
-        let (tx, rx) = tokio::sync::mpsc::channel::<std::result::Result<axum::response::sse::Event, std::convert::Infallible>>(64);
+        let (tx, rx) = tokio::sync::mpsc::channel::<
+            std::result::Result<axum::response::sse::Event, std::convert::Infallible>,
+        >(64);
 
         let model = upstream_model.clone();
         tokio::spawn(async move {
@@ -1012,7 +1066,9 @@ async fn handle_responses_via_anthropic(
                                             ""
                                         };
                                         if let Ok(event) =
-                                            serde_json::from_str::<crate::types::anthropic::AnthropicStreamEvent>(data)
+                                            serde_json::from_str::<
+                                                crate::types::anthropic::AnthropicStreamEvent,
+                                            >(data)
                                         {
                                             let events = translator.process_event(&event);
                                             for e in events {
@@ -1034,7 +1090,10 @@ async fn handle_responses_via_anthropic(
             // Ensure response.completed is emitted even if stream ended prematurely
             if translator.started && !translator.event_completed {
                 let final_resp = translator.make_completed_response();
-                let event = ResponsesStreamEvent::ResponseCompleted { response: final_resp, sequence_number: 0 };
+                let event = ResponsesStreamEvent::ResponseCompleted {
+                    response: final_resp,
+                    sequence_number: 0,
+                };
                 send_sse(&tx, &event).await;
             }
         });
@@ -1047,7 +1106,8 @@ async fn handle_responses_via_anthropic(
             Err(e) => {
                 return (
                     StatusCode::BAD_GATEWAY,
-                    serde_json::json!({"error": {"message": format!("Parse error: {}", e)}}).to_string(),
+                    serde_json::json!({"error": {"message": format!("Parse error: {}", e)}})
+                        .to_string(),
                 )
                     .into_response();
             }
@@ -1059,7 +1119,8 @@ async fn handle_responses_via_anthropic(
                 Err(e) => {
                     return (
                         StatusCode::BAD_GATEWAY,
-                        serde_json::json!({"error": {"message": format!("Parse error: {}", e)}}).to_string(),
+                        serde_json::json!({"error": {"message": format!("Parse error: {}", e)}})
+                            .to_string(),
                     )
                         .into_response();
                 }
@@ -1162,7 +1223,9 @@ async fn passthrough_request(
                 Err(e) => {
                     return (
                         StatusCode::BAD_GATEWAY,
-                        axum::Json(serde_json::json!({"error": {"message": format!("Read error: {}", e)}})),
+                        axum::Json(
+                            serde_json::json!({"error": {"message": format!("Read error: {}", e)}}),
+                        ),
                     )
                         .into_response();
                 }
@@ -1179,7 +1242,9 @@ async fn passthrough_request(
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
-            axum::Json(serde_json::json!({"error": {"message": format!("Passthrough error: {}", e)}})),
+            axum::Json(
+                serde_json::json!({"error": {"message": format!("Passthrough error: {}", e)}}),
+            ),
         )
             .into_response(),
     }
@@ -1187,14 +1252,18 @@ async fn passthrough_request(
 
 /// Send a ResponsesStreamEvent as a properly formatted axum SSE event
 async fn send_sse(
-    tx: &tokio::sync::mpsc::Sender<std::result::Result<axum::response::sse::Event, std::convert::Infallible>>,
+    tx: &tokio::sync::mpsc::Sender<
+        std::result::Result<axum::response::sse::Event, std::convert::Infallible>,
+    >,
     event: &ResponsesStreamEvent,
 ) {
     let json = serde_json::to_string(event).unwrap_or_default();
     let event_type = crate::stream::sse::event_type_str(event);
-    let _ = tx.send(Ok(axum::response::sse::Event::default()
-        .event(event_type)
-        .data(json))).await;
+    let _ = tx
+        .send(Ok(axum::response::sse::Event::default()
+            .event(event_type)
+            .data(json)))
+        .await;
 }
 
 /// Build upstream URL smartly: if base_url already contains the target path, use as-is.
@@ -1217,7 +1286,12 @@ fn build_upstream_url(base_url: &str, target_path: &str) -> String {
             if last_segment == first_segment {
                 // base: .../v1, target_path: /v1/chat/completions
                 // append only the rest of target_path after the common prefix
-                let rest = target_path.trim_start_matches('/').split('/').skip(1).collect::<Vec<_>>().join("/");
+                let rest = target_path
+                    .trim_start_matches('/')
+                    .split('/')
+                    .skip(1)
+                    .collect::<Vec<_>>()
+                    .join("/");
                 return format!("{}/{}", base, rest);
             }
         }
@@ -1340,7 +1414,11 @@ fn truncate_for_log(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}... [truncated {} bytes]", &s[..max_len], s.len() - max_len)
+        format!(
+            "{}... [truncated {} bytes]",
+            &s[..max_len],
+            s.len() - max_len
+        )
     }
 }
 

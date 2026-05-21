@@ -17,9 +17,7 @@ pub fn convert_anthropic_to_responses(
                 output.push(ResponsesOutputItem::Message {
                     id: format!("{}_{}", anthropic.id, i),
                     role: Some("assistant".to_string()),
-                    content: vec![ResponsesContentPart::OutputText {
-                        text: text.clone(),
-                    }],
+                    content: vec![ResponsesContentPart::OutputText { text: text.clone() }],
                     status: Some("completed".to_string()),
                 });
             }

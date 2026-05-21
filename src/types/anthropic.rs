@@ -100,7 +100,9 @@ pub enum AnthropicContentBlock {
         signature: Option<String>,
     },
     #[serde(rename = "redacted_thinking")]
-    RedactedThinking { data: String },
+    RedactedThinking {
+        data: String,
+    },
     Document {
         source: AnthropicDocumentSource,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -197,9 +199,7 @@ pub enum AnthropicStreamEvent {
     #[serde(rename = "ping")]
     Ping,
     #[serde(rename = "error")]
-    Error {
-        error: AnthropicErrorDetails,
-    },
+    Error { error: AnthropicErrorDetails },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

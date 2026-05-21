@@ -54,9 +54,7 @@ pub struct StreamOptions {
 pub enum ResponseFormat {
     Text,
     JsonObject,
-    JsonSchema {
-        json_schema: JsonSchemaDef,
-    },
+    JsonSchema { json_schema: JsonSchemaDef },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,7 +93,9 @@ pub enum ChatContent {
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 pub enum ChatContentPart {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     #[serde(rename = "image_url")]
     ImageUrl {
         image_url: ChatImageUrl,
@@ -104,7 +104,9 @@ pub enum ChatContentPart {
     InputAudio {
         input_audio: Value,
     },
-    Refusal { refusal: String },
+    Refusal {
+        refusal: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,7 +246,9 @@ pub fn chat_content_to_string(content: &Option<ChatContent>) -> String {
 /// Helper: check if chat content has images
 pub fn chat_content_has_image(content: &Option<ChatContent>) -> bool {
     match content {
-        Some(ChatContent::Parts(parts)) => parts.iter().any(|p| matches!(p, ChatContentPart::ImageUrl { .. })),
+        Some(ChatContent::Parts(parts)) => parts
+            .iter()
+            .any(|p| matches!(p, ChatContentPart::ImageUrl { .. })),
         _ => false,
     }
 }

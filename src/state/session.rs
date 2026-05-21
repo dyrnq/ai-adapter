@@ -27,7 +27,11 @@ impl SessionStore {
             table.insert(session_id, content)?;
         }
         write_txn.commit()?;
-        tracing::debug!("SessionStore: saved {} bytes for session_id={}", content.len(), session_id);
+        tracing::debug!(
+            "SessionStore: saved {} bytes for session_id={}",
+            content.len(),
+            session_id
+        );
         Ok(())
     }
 

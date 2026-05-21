@@ -4,7 +4,10 @@ pub async fn run(endpoint: &str, subcommand: &str) -> anyhow::Result<()> {
         "ls" => {
             let resp = reqwest::get(format!("{}/__/session", endpoint)).await?;
             let body: serde_json::Value = resp.json().await?;
-            let sessions = body["sessions"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+            let sessions = body["sessions"]
+                .as_array()
+                .map(|a| a.as_slice())
+                .unwrap_or(&[]);
             if sessions.is_empty() {
                 println!("No sessions.");
             } else {

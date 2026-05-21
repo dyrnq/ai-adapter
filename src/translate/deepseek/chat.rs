@@ -155,10 +155,7 @@ pub fn convert_responses_to_chat(
     });
 
     // -- reasoning_effort from reasoning -----------------------------------------------
-    let reasoning_effort = responses
-        .reasoning
-        .as_ref()
-        .and_then(|r| r.effort.clone());
+    let reasoning_effort = responses.reasoning.as_ref().and_then(|r| r.effort.clone());
 
     // -- logprobs / top_logprobs -------------------------------------------------------
     let (logprobs, top_logprobs) = match responses.top_logprobs {
@@ -222,8 +219,7 @@ pub fn convert_chat_to_responses_response(
         if let Some(ref finish) = choice.finish_reason {
             if finish == "length" {
                 status = "incomplete";
-                incomplete_details =
-                    Some(serde_json::json!({"reason": "max_output_tokens"}));
+                incomplete_details = Some(serde_json::json!({"reason": "max_output_tokens"}));
             }
         }
 
@@ -343,9 +339,7 @@ pub fn convert_chat_to_responses(chat: &ChatCompletionsRequest) -> ResponsesRequ
                     if !text.is_empty() {
                         input.push(ResponsesInputItem::Message {
                             role: "assistant".to_string(),
-                            content: Some(vec![ResponsesContentPart::OutputText {
-                                text,
-                            }]),
+                            content: Some(vec![ResponsesContentPart::OutputText { text }]),
                             id: None,
                             name: None,
                         });
@@ -407,10 +401,13 @@ pub fn convert_chat_to_responses(chat: &ChatCompletionsRequest) -> ResponsesRequ
     });
 
     // -- reasoning from reasoning_effort -----------------------------------------------
-    let reasoning = chat.reasoning_effort.as_ref().map(|effort| ReasoningConfig {
-        effort: Some(effort.clone()),
-        summary: None,
-    });
+    let reasoning = chat
+        .reasoning_effort
+        .as_ref()
+        .map(|effort| ReasoningConfig {
+            effort: Some(effort.clone()),
+            summary: None,
+        });
 
     // -- tools -------------------------------------------------------------------------
     let tools: Option<Vec<ResponsesTool>> = chat.tools.as_ref().map(|chat_tools| {
@@ -477,7 +474,8 @@ pub fn convert_responses_to_chat_response(
             ResponsesOutputItem::Message { content, .. } => {
                 for part in content {
                     match part {
-                        ResponsesContentPart::OutputText { text } | ResponsesContentPart::Text { text } => {
+                        ResponsesContentPart::OutputText { text }
+                        | ResponsesContentPart::Text { text } => {
                             text_parts.push(text.clone());
                         }
                         ResponsesContentPart::ToolResult { output, .. } => {
@@ -648,15 +646,13 @@ fn responses_content_parts_to_chat_content(parts: &[ResponsesContentPart]) -> Ch
         .filter_map(|p| match p {
             ResponsesContentPart::InputText { text }
             | ResponsesContentPart::OutputText { text }
-            | ResponsesContentPart::Text { text } => Some(ChatContentPart::Text {
-                text: text.clone(),
-            }),
+            | ResponsesContentPart::Text { text } => {
+                Some(ChatContentPart::Text { text: text.clone() })
+            }
             ResponsesContentPart::InputImage {
                 image_url, detail, ..
             } => {
-                let url = image_url
-                    .clone()
-                    .unwrap_or_default();
+                let url = image_url.clone().unwrap_or_default();
                 if url.is_empty() {
                     None
                 } else {
@@ -668,14 +664,12 @@ fn responses_content_parts_to_chat_content(parts: &[ResponsesContentPart]) -> Ch
                     })
                 }
             }
-            ResponsesContentPart::ImageUrl { url, detail } => {
-                Some(ChatContentPart::ImageUrl {
-                    image_url: ChatImageUrl {
-                        url: url.clone(),
-                        detail: detail.clone(),
-                    },
-                })
-            }
+            ResponsesContentPart::ImageUrl { url, detail } => Some(ChatContentPart::ImageUrl {
+                image_url: ChatImageUrl {
+                    url: url.clone(),
+                    detail: detail.clone(),
+                },
+            }),
             ResponsesContentPart::InputFile { .. } => {
                 // Chat Completions has no direct equivalent for file inputs;
                 // skip rather than silently misrepresent.
@@ -692,16 +686,16 @@ fn responses_content_parts_to_chat_content(parts: &[ResponsesContentPart]) -> Ch
 }
 
 /// Convert Chat Completions content → Responses API content parts for input.
-fn chat_content_to_responses_content_parts(content: &Option<ChatContent>) -> Option<Vec<ResponsesContentPart>> {
+fn chat_content_to_responses_content_parts(
+    content: &Option<ChatContent>,
+) -> Option<Vec<ResponsesContentPart>> {
     match content {
         None => None,
         Some(ChatContent::String(s)) => {
             if s.is_empty() {
                 None
             } else {
-                Some(vec![ResponsesContentPart::InputText {
-                    text: s.clone(),
-                }])
+                Some(vec![ResponsesContentPart::InputText { text: s.clone() }])
             }
         }
         Some(ChatContent::Parts(parts)) => {
@@ -709,9 +703,7 @@ fn chat_content_to_responses_content_parts(content: &Option<ChatContent>) -> Opt
                 .iter()
                 .filter_map(|p| match p {
                     ChatContentPart::Text { text } => {
-                        Some(ResponsesContentPart::InputText {
-                            text: text.clone(),
-                        })
+                        Some(ResponsesContentPart::InputText { text: text.clone() })
                     }
                     ChatContentPart::ImageUrl { image_url } => {
                         Some(ResponsesContentPart::InputImage {
@@ -720,11 +712,9 @@ fn chat_content_to_responses_content_parts(content: &Option<ChatContent>) -> Opt
                         })
                     }
                     ChatContentPart::InputAudio { .. } => None,
-                    ChatContentPart::Refusal { refusal } => {
-                        Some(ResponsesContentPart::InputText {
-                            text: refusal.clone(),
-                        })
-                    }
+                    ChatContentPart::Refusal { refusal } => Some(ResponsesContentPart::InputText {
+                        text: refusal.clone(),
+                    }),
                 })
                 .collect();
 

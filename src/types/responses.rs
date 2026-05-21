@@ -134,7 +134,9 @@ pub enum ResponsesInputItem {
 #[serde(rename_all = "snake_case")]
 pub enum ResponsesContentPart {
     #[serde(rename = "input_text")]
-    InputText { text: String },
+    InputText {
+        text: String,
+    },
     #[serde(rename = "input_image")]
     InputImage {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,15 +152,22 @@ pub enum ResponsesContentPart {
         filename: Option<String>,
     },
     #[serde(rename = "output_text")]
-    OutputText { text: String },
-    Text { text: String },
+    OutputText {
+        text: String,
+    },
+    Text {
+        text: String,
+    },
     #[serde(rename = "image_url")]
     ImageUrl {
         url: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
     },
-    ToolResult { call_id: String, output: String },
+    ToolResult {
+        call_id: String,
+        output: String,
+    },
 }
 
 /// Responses API response
@@ -373,4 +382,3 @@ pub enum ResponsesOutputCompactItem {
         status: String,
     },
 }
-

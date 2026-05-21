@@ -1,7 +1,7 @@
-mod config;
 mod commands;
-mod state;
+mod config;
 mod server;
+mod state;
 mod stream;
 mod translate;
 mod types;
@@ -127,8 +127,14 @@ async fn main() -> anyhow::Result<()> {
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::util::SubscriberInitExt;
         let file_appender = tracing_appender::rolling::never(
-            log_file.parent().unwrap_or_else(|| std::path::Path::new(".")),
-            log_file.file_name().unwrap_or_default().to_str().unwrap_or("ai-adapter.log"),
+            log_file
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+            log_file
+                .file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or("ai-adapter.log"),
         );
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
         _log_guard = Some(guard);
@@ -173,11 +179,7 @@ async fn main() -> anyhow::Result<()> {
         cli.vendor.as_deref(),
     )?;
 
-    tracing::info!(
-        "Starting AI Adapter on {}:{}",
-        config.host,
-        config.port
-    );
+    tracing::info!("Starting AI Adapter on {}:{}", config.host, config.port);
     tracing::info!("Upstream: {} ({})", config.base_url, config.upstream_format);
     if let Some(ref model) = config.model {
         tracing::info!("Model: {}", model);
@@ -191,7 +193,9 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&data_dir)?;
     std::fs::create_dir_all(data_dir.join("logs"))?;
     let cache_path = data_dir.join("state.redb");
-    let db = std::sync::Arc::new(tokio::sync::RwLock::new(redb::Database::create(&cache_path)?));
+    let db = std::sync::Arc::new(tokio::sync::RwLock::new(redb::Database::create(
+        &cache_path,
+    )?));
     // Ensure tables exist
     {
         let write_txn = db.read().await.begin_write()?;

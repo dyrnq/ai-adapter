@@ -12,9 +12,7 @@ use crate::types::responses::*;
 ///   supports the `developer` role).
 /// * `thinking` is always set to `None`.
 /// * Tools use `ResponsesTool::get_function()` for the nested/flat format.
-pub fn convert_responses_to_chat(
-    responses: &ResponsesRequest,
-) -> ChatCompletionsRequest {
+pub fn convert_responses_to_chat(responses: &ResponsesRequest) -> ChatCompletionsRequest {
     let mut messages = Vec::new();
 
     // instructions -> leading system message
@@ -149,10 +147,7 @@ pub fn convert_responses_to_chat(
         response_format,
         logprobs: None,
         top_logprobs: responses.top_logprobs,
-        reasoning_effort: responses
-            .reasoning
-            .as_ref()
-            .and_then(|r| r.effort.clone()),
+        reasoning_effort: responses.reasoning.as_ref().and_then(|r| r.effort.clone()),
         service_tier: responses.service_tier.clone(),
         store: responses.store,
         metadata: responses.metadata.clone(),
@@ -175,9 +170,7 @@ pub fn convert_chat_to_responses_response(
     let mut output = Vec::new();
 
     for choice in &chat.choices {
-        let finish_status = map_finish_reason_to_status(
-            choice.finish_reason.as_deref(),
-        );
+        let finish_status = map_finish_reason_to_status(choice.finish_reason.as_deref());
 
         if let Some(ref message) = choice.message {
             // text content -> message output item
@@ -247,9 +240,7 @@ pub fn convert_chat_to_responses_response(
 ///
 /// The first `system` message becomes `instructions`.  Subsequent system
 /// messages and `developer` messages are kept as input items.
-pub fn convert_chat_to_responses(
-    chat: &ChatCompletionsRequest,
-) -> ResponsesRequest {
+pub fn convert_chat_to_responses(chat: &ChatCompletionsRequest) -> ResponsesRequest {
     let mut input_items = Vec::new();
     let mut instructions: Option<String> = None;
     let mut seen_first_system = false;
@@ -258,8 +249,7 @@ pub fn convert_chat_to_responses(
         match msg.role.as_str() {
             "system" => {
                 if !seen_first_system && instructions.is_none() {
-                    instructions =
-                        Some(chat_content_to_string(&msg.content));
+                    instructions = Some(chat_content_to_string(&msg.content));
                     seen_first_system = true;
                 } else {
                     input_items.push(chat_message_to_input_item(msg));
@@ -276,11 +266,7 @@ pub fn convert_chat_to_responses(
                 if !text.is_empty() {
                     input_items.push(ResponsesInputItem::Message {
                         role: "assistant".to_string(),
-                        content: if parts.is_empty() {
-                            None
-                        } else {
-                            Some(parts)
-                        },
+                        content: if parts.is_empty() { None } else { Some(parts) },
                         id: None,
                         name: msg.name.clone(),
                     });
@@ -338,13 +324,11 @@ pub fn convert_chat_to_responses(
         let format = match rf {
             ResponseFormat::Text => TextFormat::Text,
             ResponseFormat::JsonObject => TextFormat::JsonObject,
-            ResponseFormat::JsonSchema { json_schema } => {
-                TextFormat::JsonSchema {
-                    name: json_schema.name.clone(),
-                    schema: json_schema.schema.clone(),
-                    strict: json_schema.strict,
-                }
-            }
+            ResponseFormat::JsonSchema { json_schema } => TextFormat::JsonSchema {
+                name: json_schema.name.clone(),
+                schema: json_schema.schema.clone(),
+                strict: json_schema.strict,
+            },
         };
         TextConfig {
             format: Some(format),
@@ -441,10 +425,7 @@ pub fn convert_responses_to_chat_response(
                     for part in parts {
                         if let ResponsesContentPart::Text { text } = part {
                             reasoning_text.push_str(text);
-                        } else if let ResponsesContentPart::OutputText {
-                            text,
-                        } = part
-                        {
+                        } else if let ResponsesContentPart::OutputText { text } = part {
                             reasoning_text.push_str(text);
                         }
                     }
@@ -497,17 +478,17 @@ pub fn convert_responses_to_chat_response(
         prompt_tokens: u.input_tokens,
         completion_tokens: u.output_tokens,
         total_tokens: u.total_tokens,
-        prompt_tokens_details: u.input_tokens_details.as_ref().map(|d| {
-            PromptTokensDetails {
+        prompt_tokens_details: u
+            .input_tokens_details
+            .as_ref()
+            .map(|d| PromptTokensDetails {
                 cached_tokens: d.cached_tokens,
+            }),
+        completion_tokens_details: u.output_tokens_details.as_ref().map(|d| {
+            CompletionTokensDetails {
+                reasoning_tokens: d.reasoning_tokens,
             }
         }),
-        completion_tokens_details: u
-            .output_tokens_details
-            .as_ref()
-            .map(|d| CompletionTokensDetails {
-                reasoning_tokens: d.reasoning_tokens,
-            }),
     });
 
     ChatCompletionsResponse {
@@ -545,9 +526,7 @@ fn responses_content_to_chat_content(
         .iter()
         .filter_map(|p| match p {
             ResponsesContentPart::InputText { text } => {
-                Some(ChatContentPart::Text {
-                    text: text.clone(),
-                })
+                Some(ChatContentPart::Text { text: text.clone() })
             }
             ResponsesContentPart::InputImage { image_url, detail } => {
                 Some(ChatContentPart::ImageUrl {
@@ -565,9 +544,7 @@ fn responses_content_to_chat_content(
         None
     } else if chat_parts.len() == 1 {
         match &chat_parts[0] {
-            ChatContentPart::Text { text } => {
-                Some(ChatContent::String(text.clone()))
-            }
+            ChatContentPart::Text { text } => Some(ChatContent::String(text.clone())),
             _ => Some(ChatContent::Parts(chat_parts)),
         }
     } else {
@@ -587,29 +564,21 @@ fn chat_message_to_input_item(msg: &ChatMessage) -> ResponsesInputItem {
 }
 
 /// Convert Chat content into Responses content parts (for input).
-fn chat_content_to_responses_parts(
-    content: &Option<ChatContent>,
-) -> Vec<ResponsesContentPart> {
+fn chat_content_to_responses_parts(content: &Option<ChatContent>) -> Vec<ResponsesContentPart> {
     match content {
         Some(ChatContent::String(s)) => {
-            vec![ResponsesContentPart::InputText {
-                text: s.clone(),
-            }]
+            vec![ResponsesContentPart::InputText { text: s.clone() }]
         }
         Some(ChatContent::Parts(parts)) => parts
             .iter()
             .filter_map(|p| match p {
                 ChatContentPart::Text { text } => {
-                    Some(ResponsesContentPart::InputText {
-                        text: text.clone(),
-                    })
+                    Some(ResponsesContentPart::InputText { text: text.clone() })
                 }
-                ChatContentPart::ImageUrl { image_url } => {
-                    Some(ResponsesContentPart::InputImage {
-                        image_url: Some(image_url.url.clone()),
-                        detail: image_url.detail.clone(),
-                    })
-                }
+                ChatContentPart::ImageUrl { image_url } => Some(ResponsesContentPart::InputImage {
+                    image_url: Some(image_url.url.clone()),
+                    detail: image_url.detail.clone(),
+                }),
                 _ => None,
             })
             .collect(),
