@@ -33,13 +33,9 @@ struct Cli {
     #[arg(long = "model")]
     model: Option<String>,
 
-    /// Server port
-    #[arg(short = 'p', long = "port")]
-    port: Option<u16>,
-
-    /// Server host
-    #[arg(long = "host")]
-    host: Option<String>,
+    /// Server listen address (e.g. 0.0.0.0:9090)
+    #[arg(short = 'a', long = "addr", env = "ADDR")]
+    addr: Option<String>,
 
     /// Log level (trace, debug, info, warn, error)
     #[arg(long = "log", env = "RUST_LOG")]
@@ -171,19 +167,14 @@ async fn main() -> anyhow::Result<()> {
         cli.upstream_format.as_deref(),
         cli.api_key.as_deref(),
         cli.model.as_deref(),
-        cli.port,
-        cli.host.as_deref(),
+        cli.addr.as_deref(),
         cli.drop_images,
         cli.no_cors,
         cli.log_http,
         cli.vendor.as_deref(),
     )?;
 
-    tracing::info!("Starting AI Adapter on {}:{}", config.host, config.port);
-    tracing::info!("Upstream: {} ({})", config.base_url, config.upstream_format);
-    if let Some(ref model) = config.model {
-        tracing::info!("Model: {}", model);
-    }
+    config.print();
 
     // Build router
     let data_dir = std::env::var("DATA_DIR")
@@ -212,9 +203,8 @@ async fn main() -> anyhow::Result<()> {
     let router = server::build_router(config.clone(), reason_cache, session_store);
 
     // Bind and serve
-    let addr = format!("{}:{}", config.host, config.port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    tracing::info!("Listening on {}", addr);
+    let listener = tokio::net::TcpListener::bind(&config.addr).await?;
+    tracing::info!("Listening on {}", config.addr);
 
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())

@@ -75,17 +75,12 @@ pub struct AppConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
-    #[serde(default = "default_host")]
-    pub host: String,
-    #[serde(default = "default_port")]
-    pub port: u16,
+    #[serde(default = "default_addr")]
+    pub addr: String,
 }
 
-fn default_host() -> String {
-    "0.0.0.0".to_string()
-}
-fn default_port() -> u16 {
-    9090
+fn default_addr() -> String {
+    "0.0.0.0:9090".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,8 +109,7 @@ pub struct FallbackConfig {
 /// Resolved runtime configuration
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    pub host: String,
-    pub port: u16,
+    pub addr: String,
     pub base_url: String,
     pub upstream_format: UpstreamFormat,
     pub api_key: Option<String>,
@@ -142,8 +136,7 @@ pub struct FallbackUpstream {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            host: "0.0.0.0".to_string(),
-            port: 9090,
+            addr: "0.0.0.0:9090".to_string(),
             base_url: "https://api.openai.com".to_string(),
             upstream_format: UpstreamFormat::OpenAiChat,
             api_key: None,
@@ -160,6 +153,44 @@ impl Default for RuntimeConfig {
     }
 }
 
+impl RuntimeConfig {
+    /// Pretty-print the resolved config (masks api_key)
+    pub fn print(&self) {
+        let masked_key = self
+            .api_key
+            .as_deref()
+            .map(|k| {
+                if k.len() > 8 {
+                    format!("{}****{}", &k[..4], &k[k.len() - 4..])
+                } else {
+                    "****".to_string()
+                }
+            })
+            .unwrap_or_else(|| "-".to_string());
+
+        println!("addr:             {}", self.addr);
+        println!("base_url:         {}", self.base_url);
+        println!("upstream_format:  {}", self.upstream_format);
+        println!("vendor:           {:?}", self.vendor);
+        println!("model:            {}", self.model.as_deref().unwrap_or("-"));
+        println!(
+            "api_version:      {}",
+            self.api_version.as_deref().unwrap_or("-")
+        );
+        println!("api_key:          {}", masked_key);
+        println!("drop_images:      {}", self.drop_images);
+        println!("backfill_reason:  {}", self.backfill_reasoning);
+        println!("cors:             {}", self.cors);
+        println!("log_http:         {}", self.log_http);
+        if let Some(ref fb) = self.fallback {
+            println!("fallback:         {} ({})", fb.base_url, fb.format);
+        }
+        if !self.extra_headers.is_empty() {
+            println!("extra_headers:    {} entries", self.extra_headers.len());
+        }
+    }
+}
+
 /// Load config from file, env vars, and CLI overrides
 #[allow(clippy::too_many_arguments)]
 pub fn load_config(
@@ -168,8 +199,7 @@ pub fn load_config(
     cli_format: Option<&str>,
     cli_api_key: Option<&str>,
     cli_model: Option<&str>,
-    cli_port: Option<u16>,
-    cli_host: Option<&str>,
+    cli_addr: Option<&str>,
     cli_drop_images: bool,
     cli_no_cors: bool,
     cli_log_http: bool,
@@ -185,8 +215,7 @@ pub fn load_config(
 
         // Apply server config
         if let Some(server) = &app_config.server {
-            config.host = server.host.clone();
-            config.port = server.port;
+            config.addr = server.addr.clone();
         }
 
         // Apply global headers
@@ -239,13 +268,8 @@ pub fn load_config(
     if let Ok(model) = std::env::var("UPSTREAM_MODEL") {
         config.model = Some(model);
     }
-    if let Ok(port) = std::env::var("PORT") {
-        if let Ok(p) = port.parse() {
-            config.port = p;
-        }
-    }
-    if let Ok(host) = std::env::var("HOST") {
-        config.host = host;
+    if let Ok(addr) = std::env::var("ADDR") {
+        config.addr = addr;
     }
 
     // Load .env file if exists
@@ -266,11 +290,8 @@ pub fn load_config(
     if let Some(model) = cli_model {
         config.model = Some(model.to_string());
     }
-    if let Some(port) = cli_port {
-        config.port = port;
-    }
-    if let Some(host) = cli_host {
-        config.host = host.to_string();
+    if let Some(addr) = cli_addr {
+        config.addr = addr.to_string();
     }
     config.drop_images = cli_drop_images;
     if cli_no_cors {
