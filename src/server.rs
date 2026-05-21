@@ -937,19 +937,18 @@ async fn handle_responses_via_chat(
             }
         };
 
-        let chat_resp: crate::types::chat::ChatCompletionsResponse = match serde_json::from_value(
-            upstream_body,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                return (
+        let chat_resp: crate::types::chat::ChatCompletionsResponse =
+            match serde_json::from_value(upstream_body) {
+                Ok(r) => r,
+                Err(e) => {
+                    return (
                     StatusCode::BAD_GATEWAY,
                     serde_json::json!({"error": {"message": format!("Failed to parse: {}", e)}})
                         .to_string(),
                 )
                     .into_response();
-            }
-        };
+                }
+            };
 
         let responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
         (
