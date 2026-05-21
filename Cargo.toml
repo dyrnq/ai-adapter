@@ -1,0 +1,54 @@
+[package]
+name = "ai-adapter"
+version = "0.0.1"
+edition = "2021"
+description = "AI API adapter - bidirectional proxy translating between OpenAI Responses, Chat Completions, and Anthropic Messages APIs"
+license = "MIT"
+repository = "https://github.com/dyrnq/ai-adapter"
+
+[build-dependencies]
+chrono = "0.4"
+
+[dependencies]
+# HTTP framework
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
+tracing-appender = "0.2"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Config file
+serde_yaml = "0.9"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+dotenvy = "0.15"
+tokio-stream = "0.1"
+futures = "0.3"
+redb = "2"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
