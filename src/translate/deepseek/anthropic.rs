@@ -1228,6 +1228,7 @@ mod tests {
             store: None,
             metadata: None,
             previous_response_id: None,
+            session_id: None,
             user: None,
             service_tier: None,
             parallel_tool_calls: None,
