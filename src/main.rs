@@ -186,10 +186,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build router
-    let data_dir = std::env::var("HOME")
+    let data_dir = std::env::var("DATA_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".ai-adapter");
+        .unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(".ai-adapter")
+        });
     std::fs::create_dir_all(&data_dir)?;
     std::fs::create_dir_all(data_dir.join("logs"))?;
     let cache_path = data_dir.join("state.redb");
