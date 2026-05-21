@@ -1,0 +1,30 @@
+# Build stage
+FROM rust:1.85-alpine AS builder
+
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev
+
+WORKDIR /app
+
+# Cache dependencies
+COPY Cargo.toml Cargo.lock* ./
+RUN mkdir src && echo 'fn main() {}' > src/main.rs
+RUN cargo build --release 2>/dev/null || true
+RUN rm -rf src
+
+# Build application
+COPY src/ src/
+RUN cargo build --release
+
+# Runtime stage
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /app/target/release/ai-adapter /usr/local/bin/ai-adapter
+
+EXPOSE 9090
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:9090/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/ai-adapter"]
