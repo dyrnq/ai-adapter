@@ -46,6 +46,7 @@ pub fn build_router(
     config: RuntimeConfig,
     reason_cache: ReasoningCache,
     session_store: SessionStore,
+    access_log_dir: Option<String>,
 ) -> Router {
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(300))
@@ -86,7 +87,7 @@ pub fn build_router(
         error_dump_middleware(req, next, state)
     });
 
-    Router::new()
+    let router = Router::new()
         .route("/v1/chat/completions", post(handle_chat_completions))
         .route("/v1/responses", post(handle_responses))
         .route("/v1/responses/compact", post(handle_compact))
@@ -97,7 +98,37 @@ pub fn build_router(
         .layer(error_dump_layer)
         .layer(trace_layer)
         .layer(cors)
-        .with_state(state)
+        .with_state(state);
+
+    // Attach access log middleware if configured
+    let router = match access_log_dir {
+        Some(ref dir) => {
+            let log_dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&log_dir).ok();
+            let writer = std::sync::Arc::new(std::sync::Mutex::new(AccessLog::new(&log_dir)));
+            router.layer(axum::middleware::from_fn(
+                move |req: Request, next: Next| {
+                    let w = writer.clone();
+                    let d = log_dir.clone();
+                    async move {
+                        let method = req.method().to_string();
+                        let uri = req.uri().to_string();
+                        let start = std::time::Instant::now();
+                        let response = next.run(req).await;
+                        let status = response.status().as_u16();
+                        let elapsed = start.elapsed().as_millis();
+                        if let Ok(mut a) = w.lock() {
+                            a.write(&d, &method, &uri, status, elapsed);
+                        }
+                        response
+                    }
+                },
+            ))
+        }
+        None => router,
+    };
+
+    router
 }
 
 async fn handle_health() -> impl IntoResponse {
@@ -1444,5 +1475,51 @@ fn save_error_dump(status: u16, dump_json: &str) {
     match std::fs::write(&path, dump_json) {
         Ok(_) => tracing::warn!("Error dump saved to {}", path.display()),
         Err(e) => tracing::error!("Failed to save error dump: {}", e),
+    }
+}
+
+struct AccessLog {
+    file: std::fs::File,
+    date: String,
+}
+
+impl AccessLog {
+    fn new(dir: &std::path::Path) -> Self {
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let path = dir.join(format!("access.{}.log", today));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap_or_else(|_| std::fs::File::create(&path).unwrap());
+        Self { file, date: today }
+    }
+
+    fn write(
+        &mut self,
+        dir: &std::path::Path,
+        method: &str,
+        uri: &str,
+        status: u16,
+        elapsed_ms: u128,
+    ) {
+        use std::io::Write;
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        if self.date != today {
+            let path = dir.join(format!("access.{}.log", today));
+            self.file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .unwrap_or_else(|_| std::fs::File::create(&path).unwrap());
+            self.date = today;
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = writeln!(
+            self.file,
+            r#"{{"time":"{}","method":"{}","uri":"{}","status":{},"latency_ms":{}}}"#,
+            now, method, uri, status, elapsed_ms
+        );
+        let _ = self.file.flush();
     }
 }

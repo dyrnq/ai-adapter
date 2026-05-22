@@ -63,14 +63,19 @@ impl UpstreamFormat {
 }
 
 /// Main config structure (YAML/JSON config file)
+/// Fields mirror CLI options; use camelCase for JSON, snake_case for YAML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub server: Option<ServerConfig>,
-    pub upstreams: Option<Vec<UpstreamConfig>>,
-    #[serde(rename = "currentUpstream")]
-    pub current_upstream: Option<String>,
+    #[serde(rename = "baseUrl")]
+    pub base_url: Option<String>,
+    pub format: Option<String>,
+    pub apikey: Option<String>,
+    pub model: Option<String>,
+    #[serde(rename = "dropImages")]
+    pub drop_images: Option<bool>,
+    pub vendor: Option<String>,
     pub headers: Option<HashMap<String, String>>,
-    pub fallback: Option<FallbackConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,30 +88,6 @@ fn default_addr() -> String {
     "0.0.0.0:9090".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamConfig {
-    pub name: String,
-    pub format: Option<String>,
-    #[serde(rename = "baseUrl")]
-    pub base_url: String,
-    #[serde(rename = "apiVersion")]
-    pub api_version: Option<String>,
-    pub apikey: Option<String>,
-    pub model: Option<String>,
-    #[serde(rename = "dropImages")]
-    pub drop_images: Option<bool>,
-    #[serde(rename = "backfillReasoning")]
-    pub backfill_reasoning: Option<bool>,
-    pub headers: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FallbackConfig {
-    pub enabled: Option<bool>,
-    pub upstream: Option<String>,
-}
-
-/// Resolved runtime configuration
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub addr: String,
@@ -119,7 +100,7 @@ pub struct RuntimeConfig {
     pub backfill_reasoning: bool,
     pub cors: bool,
     pub log_http: bool,
-    pub fallback: Option<FallbackUpstream>,
+    pub access_log_dir: Option<String>,
     pub extra_headers: HashMap<String, String>,
     pub vendor: UpstreamVendor,
 }
@@ -146,7 +127,7 @@ impl Default for RuntimeConfig {
             backfill_reasoning: false,
             cors: true,
             log_http: false,
-            fallback: None,
+            access_log_dir: None,
             extra_headers: HashMap::new(),
             vendor: UpstreamVendor::Auto,
         }
@@ -182,8 +163,8 @@ impl RuntimeConfig {
         println!("backfill_reason:  {}", self.backfill_reasoning);
         println!("cors:             {}", self.cors);
         println!("log_http:         {}", self.log_http);
-        if let Some(ref fb) = self.fallback {
-            println!("fallback:         {} ({})", fb.base_url, fb.format);
+        if let Some(ref d) = self.access_log_dir {
+            println!("access_log_dir:   {}", d);
         }
         if !self.extra_headers.is_empty() {
             println!("extra_headers:    {} entries", self.extra_headers.len());
@@ -204,6 +185,7 @@ pub fn load_config(
     cli_no_cors: bool,
     cli_log_http: bool,
     cli_vendor: Option<&str>,
+    cli_access_log_dir: Option<&str>,
 ) -> anyhow::Result<RuntimeConfig> {
     let mut config = RuntimeConfig::default();
 
@@ -218,38 +200,39 @@ pub fn load_config(
             config.addr = server.addr.clone();
         }
 
+        // Apply flat upstream config (mirrors CLI)
+        if let Some(ref url) = app_config.base_url {
+            config.base_url = url.clone();
+        }
+        if let Some(ref fmt) = app_config.format {
+            if let Some(f) = UpstreamFormat::from_str(fmt) {
+                config.upstream_format = f;
+            }
+        }
+        if let Some(ref key) = app_config.apikey {
+            config.api_key = Some(key.clone());
+        }
+        if let Some(ref model) = app_config.model {
+            config.model = Some(model.clone());
+        }
+        if let Some(d) = app_config.drop_images {
+            config.drop_images = d;
+        }
+        if let Some(ref v) = app_config.vendor {
+            config.vendor = match v.as_str() {
+                "deepseek" => UpstreamVendor::DeepSeek,
+                "openai" => UpstreamVendor::OpenAI,
+                "anthropic" => UpstreamVendor::Anthropic,
+                "auto" => UpstreamVendor::Auto,
+                _ => UpstreamVendor::Auto,
+            };
+        }
+
         // Apply global headers
         if let Some(headers) = &app_config.headers {
             config
                 .extra_headers
                 .extend(headers.iter().map(|(k, v)| (k.to_lowercase(), v.clone())));
-        }
-
-        // Apply current upstream config
-        let upstream_name = app_config.current_upstream.as_deref().unwrap_or("default");
-        if let Some(upstreams) = &app_config.upstreams {
-            if let Some(upstream) = upstreams.iter().find(|u| u.name == upstream_name) {
-                apply_upstream(&mut config, upstream, app_config.headers.as_ref());
-            }
-
-            // Apply fallback
-            if let Some(fallback) = &app_config.fallback {
-                if fallback.enabled.unwrap_or(false) {
-                    if let Some(ref fb_name) = fallback.upstream {
-                        if let Some(fb_upstream) = upstreams.iter().find(|u| &u.name == fb_name) {
-                            config.fallback = Some(FallbackUpstream {
-                                base_url: fb_upstream.base_url.clone(),
-                                format: UpstreamFormat::from_str(
-                                    fb_upstream.format.as_deref().unwrap_or("openai-chat"),
-                                )
-                                .unwrap_or(UpstreamFormat::OpenAiChat),
-                                api_key: fb_upstream.apikey.clone(),
-                                model: fb_upstream.model.clone(),
-                            });
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -298,6 +281,13 @@ pub fn load_config(
         config.cors = false;
     }
     config.log_http = cli_log_http || config.log_http;
+    if let Some(d) = cli_access_log_dir {
+        config.access_log_dir = Some(d.to_string());
+    } else if config.access_log_dir.is_none() {
+        if let Ok(d) = std::env::var("LOG_DIR") {
+            config.access_log_dir = Some(d);
+        }
+    }
     if let Some(v) = cli_vendor {
         config.vendor = match v {
             "deepseek" => UpstreamVendor::DeepSeek,
@@ -309,41 +299,4 @@ pub fn load_config(
     }
 
     Ok(config)
-}
-
-fn apply_upstream(
-    config: &mut RuntimeConfig,
-    upstream: &UpstreamConfig,
-    _global_headers: Option<&HashMap<String, String>>,
-) {
-    config.base_url = upstream.base_url.clone();
-    if let Some(ref fmt) = upstream.format {
-        if let Some(f) = UpstreamFormat::from_str(fmt) {
-            config.upstream_format = f;
-        }
-    }
-    if let Some(ref key) = upstream.apikey {
-        config.api_key = Some(key.clone());
-    }
-    if let Some(ref model) = upstream.model {
-        config.model = Some(model.clone());
-    }
-    if let Some(ref version) = upstream.api_version {
-        config.api_version = Some(version.clone());
-    }
-    if let Some(drop_images) = upstream.drop_images {
-        config.drop_images = drop_images;
-    }
-    if let Some(backfill) = upstream.backfill_reasoning {
-        config.backfill_reasoning = backfill;
-    }
-
-    // Merge headers: per-upstream overrides global
-    if let Some(ref upstream_headers) = upstream.headers {
-        config.extra_headers.extend(
-            upstream_headers
-                .iter()
-                .map(|(k, v)| (k.to_lowercase(), v.clone())),
-        );
-    }
 }
