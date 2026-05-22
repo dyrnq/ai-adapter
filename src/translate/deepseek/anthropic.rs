@@ -37,13 +37,25 @@ pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> Anthropic
     let tools = responses.tools.as_ref().map(|ts| {
         ts.iter()
             .filter_map(|t| t.get_function())
-            .map(|f| AnthropicTool {
-                name: f.name,
-                description: f.description,
-                input_schema: f
+            .map(|f| {
+                let mut schema = f
                     .parameters
-                    .unwrap_or(Value::Object(serde_json::Map::new())),
-                cache_control: None,
+                    .unwrap_or_else(|| serde_json::json!({"type": "object"}));
+                // Ensure schema has "type": "object" (DeepSeek requires it)
+                if let Some(obj) = schema.as_object_mut() {
+                    if !obj.contains_key("type") {
+                        obj.insert(
+                            "type".to_string(),
+                            serde_json::Value::String("object".to_string()),
+                        );
+                    }
+                }
+                AnthropicTool {
+                    name: f.name,
+                    description: f.description,
+                    input_schema: schema,
+                    cache_control: None,
+                }
             })
             .collect()
     });
