@@ -103,30 +103,11 @@ jobs:
           if-no-files-found: error
 
   docker:
-    name: Docker multi-arch (${{ matrix.arch }})
+    name: Docker multi-arch
     needs: build
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - linux/amd64
-          - linux/arm64
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download binary artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.arch == 'linux/amd64' && 'x86_64-unknown-linux-musl' || 'aarch64-unknown-linux-musl' }}
-          path: artifact
-
-      - name: Prepare binary
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          BIN=$(find artifact -name "${{ env.BINARY_NAME }}-*" -type f | head -1)
-          cp "$BIN" ./${{ env.BINARY_NAME }}
-          chmod +x ./${{ env.BINARY_NAME }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -153,7 +134,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.arch }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
