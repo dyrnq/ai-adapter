@@ -6,6 +6,7 @@
 #      mkdir -p bin/amd64 bin/arm64
 #      cp artifacts/x86_64-unknown-linux-gnu/ai-adapter-* bin/amd64/ai-adapter
 #      cp artifacts/aarch64-unknown-linux-gnu/ai-adapter-* bin/arm64/ai-adapter
+#      chmod +x bin/amd64/ai-adapter bin/arm64/ai-adapter
 #   3. docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.static .
 
 FROM alpine:3.21
@@ -21,6 +22,7 @@ ARG TARGETPLATFORM
 # CI workflow stages them as bin/amd64/ai-adapter and bin/arm64/ai-adapter
 COPY bin/ /tmp/bin/
 RUN cp /tmp/bin/${TARGETPLATFORM#linux/}/ai-adapter /usr/local/bin/ai-adapter && \
+    chmod 755 /usr/local/bin/ai-adapter && \
     rm -rf /tmp/bin
 
 VOLUME ["/data"]
