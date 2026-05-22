@@ -131,11 +131,31 @@ jobs:
       - name: Organize binaries for multi-arch build
         shell: bash
         run: |
-          ls -la artifacts/*/
+          echo "=== artifacts tree ==="
+          find artifacts -type f -o -type d | head -30
+          echo "=== end ==="
           mkdir -p bin/amd64 bin/arm64
-          find artifacts/x86_64-unknown-linux-musl/ -type f -exec cp {} bin/amd64/ai-adapter \;
-          find artifacts/aarch64-unknown-linux-musl/ -type f -exec cp {} bin/arm64/ai-adapter \;
+
+          # Get the single binary file from each artifact subdirectory
+          AMD64_FILE=$(find artifacts/x86_64-unknown-linux-musl -type f 2>/dev/null | head -1)
+          ARM64_FILE=$(find artifacts/aarch64-unknown-linux-musl -type f 2>/dev/null | head -1)
+
+          if [ -z "$AMD64_FILE" ]; then
+            echo "ERROR: amd64 musl artifact not found!"
+            find artifacts -type f
+            exit 1
+          fi
+          if [ -z "$ARM64_FILE" ]; then
+            echo "ERROR: arm64 musl artifact not found!"
+            find artifacts -type f
+            exit 1
+          fi
+
+          cp "$AMD64_FILE" bin/amd64/ai-adapter
+          cp "$ARM64_FILE" bin/arm64/ai-adapter
           chmod +x bin/amd64/ai-adapter bin/arm64/ai-adapter
+          echo "Copied amd64: $AMD64_FILE"
+          echo "Copied arm64: $ARM64_FILE" 
 
       - name: Extract metadata
         id: meta
