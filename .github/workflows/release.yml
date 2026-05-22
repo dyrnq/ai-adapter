@@ -121,30 +121,44 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Download musl artifacts
+      - name: Download amd64 musl artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: "x86_64-unknown-linux-musl|aarch64-unknown-linux-musl"
+          name: x86_64-unknown-linux-musl
           path: artifacts
-          merge-multiple: false
+
+      - name: Download arm64 musl artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aarch64-unknown-linux-musl
+          path: artifacts
 
       - name: Organize binaries for multi-arch build
         shell: bash
         run: |
-          echo "=== Downloaded artifacts ==="
-          find artifacts -type f
+          set -e
+          echo "=== artifacts tree ==="
+          find artifacts -type f -o -type d | head -50
           echo "=== end ==="
           mkdir -p bin/amd64 bin/arm64
-          # Use while read + basename like hostab does
-          find artifacts/x86_64-unknown-linux-musl -type f | while read f; do
-            cp "$f" bin/amd64/ai-adapter
+          # Find the binary by matching target in filename, since download-artifact
+          # may flatten the structure. Use basename approach like hostab.
+          find artifacts -type f -name 'ai-adapter-*' | while read f; do
+            case "$f" in
+              *x86_64*) cp "$f" bin/amd64/ai-adapter ; echo "amd64: $f" ;;
+              *aarch64*) cp "$f" bin/arm64/ai-adapter ; echo "arm64: $f" ;;
+            esac
           done
-          find artifacts/aarch64-unknown-linux-musl -type f | while read f; do
-            cp "$f" bin/arm64/ai-adapter
-          done
+          if [ ! -f bin/amd64/ai-adapter ]; then
+            echo "ERROR: amd64 binary not found!"
+            exit 1
+          fi
+          if [ ! -f bin/arm64/ai-adapter ]; then
+            echo "ERROR: arm64 binary not found!"
+            exit 1
+          fi
           chmod +x bin/amd64/ai-adapter bin/arm64/ai-adapter
-          echo "Staged amd64 and arm64 binaries"
-          ls -la bin/amd64/ bin/arm64/ 
+          ls -la bin/amd64/ bin/arm64/
 
       - name: Extract metadata
         id: meta
