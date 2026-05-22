@@ -28,6 +28,7 @@ pub struct ChatCompletionsRequest {
     pub response_format: Option<ResponseFormat>,
     pub logprobs: Option<bool>,
     pub top_logprobs: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
     pub store: Option<bool>,
