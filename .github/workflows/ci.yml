@@ -83,20 +83,11 @@ jobs:
         run: cargo test --release
 
   docker:
-    name: Docker build (${{ matrix.arch }})
+    name: Docker build
     needs: unit-tests
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - linux/amd64
-          - linux/arm64
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -105,7 +96,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.arch }}
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
