@@ -90,6 +90,7 @@ pub struct AnthropicStreamTranslator {
     has_tool_call: bool,
     seq: u32,
     pub event_completed: bool,
+    created: i64,
 }
 
 impl AnthropicStreamTranslator {
@@ -116,7 +117,15 @@ impl AnthropicStreamTranslator {
             has_tool_call: false,
             seq: 0,
             event_completed: false,
+            created: Self::now_unix(),
         }
+    }
+
+    fn now_unix() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
     }
 
     fn next_seq(&mut self) -> u32 {
@@ -412,15 +421,15 @@ impl AnthropicStreamTranslator {
                 output_tokens: self.output_tokens,
                 total_tokens: self.input_tokens + self.output_tokens,
                 input_tokens_details: Some(crate::types::responses::InputTokensDetails {
-                    cached_tokens,
+                    cached_tokens: Some(cached_tokens.unwrap_or(0)),
                 }),
                 output_tokens_details: None,
             }),
             model: Some(self.model.clone()),
             incomplete_details: None,
             error: None,
-            created_at: None,
-            completed_at: None,
+            created_at: Some(self.created),
+            completed_at: Some(Self::now_unix()),
         }
     }
 
