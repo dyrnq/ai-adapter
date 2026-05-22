@@ -64,23 +64,23 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 
 ## CLI Options
 
-| Flag                | Env                 | Default       | Description                                  |
-| ------------------- | ------------------- | ------------- | -------------------------------------------- |
-| `-c, --config`      | —                   | —             | Config file (YAML/JSON)                      |
-| `--base-url`        | `UPSTREAM_BASE_URL` | —             | Upstream API base URL                        |
-| `--upstream-format` | `UPSTREAM_FORMAT`   | `openai-chat` | `anthropic`, `openai-chat`, `responses`      |
-| `--vendor`          | —                   | `auto`        | `deepseek`, `openai`, `anthropic`, `auto`    |
-| `--apikey`          | `UPSTREAM_API_KEY`  | —             | Upstream API key                             |
-| `--model`           | `UPSTREAM_MODEL`    | —             | Default model override                       |
-| `-a, --addr`        | `ADDR`              | `0.0.0.0:9090`| Server listen address                        |
-| `--log-level`       | `RUST_LOG`          | `info`        | `trace`, `debug`, `info`, `warn`, `error`    |
-| `--log-dir`         | `LOG_DIR`           | `$DATA_DIR/logs`| Write JSON logs to directory (daily rotate) |
-| `--logtostderr`     | `LOGTOSTDERROR`     | `true`        | Log to stderr (set false for file-only)      |
-| `--alsologtostderr` | `ALSOLOGTOSTDERROR` | `false`       | Log to stderr as well as files               |
-| `--access-log`      | —                   | —             | Log HTTP request/response bodies             |
-| `--access-log-dir`  | `ACCESS_LOG_DIR`    | `$LOG_DIR`    | Write HTTP access logs to directory (JSON)   |
-| `--drop-images`     | —                   | —             | Strip images from requests                   |
-| `--no-cors`         | —                   | —             | Disable CORS headers                         |
+| Flag                | Env                 | Default                | Description                                  |
+| ------------------- | ------------------- | ---------------------- | -------------------------------------------- |
+| `-c, --config`      | —                   | —                      | Config file (YAML/JSON)                      |
+| `--base-url`        | `UPSTREAM_BASE_URL` | —                      | Upstream API base URL                        |
+| `--upstream-format` | `UPSTREAM_FORMAT`   | `openai-chat`          | `anthropic`, `openai-chat`, `responses`      |
+| `--vendor`          | —                   | `auto`                 | `deepseek`, `openai`, `anthropic`, `auto`    |
+| `--apikey`          | `UPSTREAM_API_KEY`  | —                      | Upstream API key                             |
+| `--model`           | `UPSTREAM_MODEL`    | —                      | Default model override                       |
+| `-a, --addr`        | `ADDR`              | `0.0.0.0:9090`         | Server listen address                        |
+| `--log-level`       | `RUST_LOG`          | `info`                 | `trace`, `debug`, `info`, `warn`, `error`    |
+| `--log-dir`         | `LOG_DIR`           | `$DATA_DIR/logs`       | JSON app log directory (daily rotated)       |
+| `--logtostderr`     | `LOGTOSTDERROR`     | `true`                 | Log to stderr (set false for file-only)      |
+| `--alsologtostderr` | `ALSOLOGTOSTDERROR` | `false`                | Also log to stderr when file logging active  |
+| `--access-log`      | —                   | `false`                | Enable HTTP access log (JSON lines)          |
+| `--access-log-dir`  | `ACCESS_LOG_DIR`    | `$LOG_DIR`             | Access log directory (defaults to LOG_DIR)   |
+| `--drop-images`     | —                   | `false`                | Strip images from requests                   |
+| `--no-cors`         | —                   | `false`                | Disable CORS headers                         |
 
 ## API Endpoints
 
@@ -154,14 +154,24 @@ docker run -d -p 9090:9090 \
   dyrnq/ai-adapter
 ```
 
+### Build Options
+
+| Dockerfile           | Use case                              |
+| -------------------- | ------------------------------------- |
+| `Dockerfile`         | Local build with `cargo build` inside |
+| `Dockerfile.static`  | CI release — copies pre-built binary  |
+
+### Volume / Environment
+
 | Volume / Env        | Description                              |
 | ------------------- | ---------------------------------------- |
 | `/data` (volume)    | Persistent data: state DB and logs       |
 | `DATA_DIR`          | Data directory (default `/data`)         |
 | `ADDR`              | Listen address (default `0.0.0.0:9090`)  |
 | `LOGTOSTDERROR`     | Log to stderr (default `true`)           |
+| `ALSOLOGTOSTDERROR` | Also log to stderr when file logging on  |
 | `LOG_DIR`           | App log directory (default `$DATA_DIR/logs`) |
-| `ACCESS_LOG_DIR`    | HTTP access log directory                |
+| `ACCESS_LOG_DIR`    | HTTP access log directory (default `$LOG_DIR`) |
 
 ## License
 
