@@ -143,14 +143,24 @@ curl http://localhost:9090/v1/responses \
 
 ## Docker
 
+Use the pre-built image from Docker Hub:
+
 ```bash
-docker build -t ai-adapter .
 docker run -d -p 9090:9090 \
+  -v ai-adapter-data:/data \
   -e UPSTREAM_BASE_URL=https://api.deepseek.com/anthropic \
   -e UPSTREAM_FORMAT=anthropic \
   -e UPSTREAM_API_KEY=sk-xxx \
-  ai-adapter
+  dyrnq/ai-adapter
 ```
+
+| Volume / Env        | Description                              |
+| ------------------- | ---------------------------------------- |
+| `/data`             | State DB (`state.redb`) and logs         |
+| `ADDR`              | Listen address (default `0.0.0.0:9090`)  |
+| `LOGTOSTDERROR`     | Log to stderr (default `true`)           |
+| `LOG_DIR`           | App log directory (default `/data/logs`) |
+| `ACCESS_LOG_DIR`    | HTTP access log directory                |
 
 ## License
 
