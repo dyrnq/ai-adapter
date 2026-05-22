@@ -169,7 +169,7 @@ pub fn convert_responses_to_chat(
         stream: responses.stream,
         max_tokens: None,
         max_completion_tokens: responses.max_output_tokens,
-        temperature: responses.temperature,
+        temperature: Some(responses.temperature.unwrap_or(1.0)),
         top_p: responses.top_p,
         frequency_penalty: responses.frequency_penalty,
         presence_penalty: responses.presence_penalty,
