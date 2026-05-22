@@ -162,13 +162,16 @@ async fn main() -> anyhow::Result<()> {
     let write_stderr = logtostderr || alsologtostderr;
 
     if write_file {
-        let file_appender = tracing_appender::rolling::daily(log_dir, "ai-adapter");
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-        _log_guard = Some(guard);
+        let prefix = format!("server.{}", std::process::id());
+        let file_appender = tracing_appender::rolling::daily(log_dir, prefix);
+        // Use blocking writer for reliability — the async flusher is started in a
+        // background thread and can miss early log entries.
         let file_layer = tracing_subscriber::fmt::layer()
             .json()
             .with_target(false)
-            .with_writer(non_blocking)
+            .with_thread_ids(false)
+            .with_thread_names(true)
+            .with_writer(file_appender)
             .with_file(false)
             .with_line_number(false);
 
