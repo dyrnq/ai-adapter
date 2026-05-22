@@ -121,16 +121,22 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Download Linux musl artifacts
+      - name: Download x86_64 musl artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: "x86_64-unknown-linux-musl|aarch64-unknown-linux-musl"
-          path: artifacts
-          merge-multiple: false
+          name: x86_64-unknown-linux-musl
+          path: artifacts/x86_64-unknown-linux-musl
+
+      - name: Download aarch64 musl artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aarch64-unknown-linux-musl
+          path: artifacts/aarch64-unknown-linux-musl
 
       - name: Organize binaries for multi-arch build
         shell: bash
         run: |
+          set -e
           echo "=== artifacts tree ==="
           find artifacts -type f -o -type d | head -30
           echo "=== end ==="
@@ -154,8 +160,8 @@ jobs:
           cp "$AMD64_FILE" bin/amd64/ai-adapter
           cp "$ARM64_FILE" bin/arm64/ai-adapter
           chmod +x bin/amd64/ai-adapter bin/arm64/ai-adapter
-          echo "Copied amd64: $AMD64_FILE"
-          echo "Copied arm64: $ARM64_FILE" 
+          echo "Copied: $AMD64_FILE -> bin/amd64/ai-adapter"
+          echo "Copied: $ARM64_FILE -> bin/arm64/ai-adapter" 
 
       - name: Extract metadata
         id: meta
