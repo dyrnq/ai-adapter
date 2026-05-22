@@ -201,6 +201,20 @@ jobs:
           cat changelog.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Delete existing release (if any)
+        id: delete_release
+        shell: bash
+        continue-on-error: true
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}"             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}"             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}")
+          if [ "$HTTP_CODE" = "200" ]; then
+            RELEASE_ID=$(curl -s               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}"               "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"               | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+            curl -s -X DELETE               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}"               "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
+            echo "Deleted release $RELEASE_ID for ${{ github.ref_name }}"
+          else
+            echo "No existing release for ${{ github.ref_name }}"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
