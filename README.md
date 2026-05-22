@@ -156,10 +156,11 @@ docker run -d -p 9090:9090 \
 
 | Volume / Env        | Description                              |
 | ------------------- | ---------------------------------------- |
-| `/data`             | State DB (`state.redb`) and logs         |
+| `/data` (volume)    | Persistent data: state DB and logs       |
+| `DATA_DIR`          | Data directory (default `/data`)         |
 | `ADDR`              | Listen address (default `0.0.0.0:9090`)  |
 | `LOGTOSTDERROR`     | Log to stderr (default `true`)           |
-| `LOG_DIR`           | App log directory (default `/data/logs`) |
+| `LOG_DIR`           | App log directory (default `$DATA_DIR/logs`) |
 | `ACCESS_LOG_DIR`    | HTTP access log directory                |
 
 ## License
