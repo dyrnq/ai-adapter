@@ -108,8 +108,11 @@ jobs:
         with:
           targets: aarch64-unknown-linux-musl
 
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
       - name: Build aarch64 musl binary
-        run: cargo build --release --target aarch64-unknown-linux-musl
+        run: cross build --release --target aarch64-unknown-linux-musl
 
       - name: Stage aarch64 binary
         run: |
