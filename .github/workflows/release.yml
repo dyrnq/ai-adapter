@@ -131,9 +131,10 @@ jobs:
       - name: Organize binaries for multi-arch build
         shell: bash
         run: |
+          ls -la artifacts/*/
           mkdir -p bin/amd64 bin/arm64
-          cp artifacts/x86_64-unknown-linux-musl/ai-adapter-* bin/amd64/ai-adapter
-          cp artifacts/aarch64-unknown-linux-musl/ai-adapter-* bin/arm64/ai-adapter
+          find artifacts/x86_64-unknown-linux-musl/ -type f -exec cp {} bin/amd64/ai-adapter \;
+          find artifacts/aarch64-unknown-linux-musl/ -type f -exec cp {} bin/arm64/ai-adapter \;
           chmod +x bin/amd64/ai-adapter bin/arm64/ai-adapter
 
       - name: Extract metadata
