@@ -83,11 +83,23 @@ jobs:
         run: cargo test --release
 
   docker:
-    name: Docker build
+    name: Docker build & verify
     needs: unit-tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build binary
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Stage binary for Dockerfile.static
+        run: |
+          mkdir -p bin/amd64
+          cp target/x86_64-unknown-linux-gnu/release/ai-adapter bin/amd64/ai-adapter
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -99,7 +111,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          file: Dockerfile.static
+          platforms: linux/amd64
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
+          tags: ai-adapter:test
+
+      - name: Verify version
+        run: docker run --rm ai-adapter:test version
