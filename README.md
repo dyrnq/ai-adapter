@@ -30,7 +30,7 @@ Codex / Client          AI Adapter :9090          Upstream
 - **Compaction**: `POST /v1/responses/compact` for Codex CLI context management
 - **Config-driven**: YAML/JSON config files, environment variables, CLI flags
 - **Error dumps**: Saves failed exchanges to `logs/` with auth redaction
-- **JSON file logging**: Structured logging to file via `--log-file`
+- **Structured logging**: Human-readable to stderr, JSON to daily-rotated files
 
 ## Quick Start
 
@@ -54,6 +54,10 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 # Show version info
 ./target/release/ai-adapter version
 
+# Print default config template (yaml)
+./target/release/ai-adapter config
+./target/release/ai-adapter config --format json
+
 # List active sessions (requires running server)
 ./target/release/ai-adapter session ls
 ```
@@ -65,14 +69,16 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 | `-c, --config`      | —                   | —             | Config file (YAML/JSON)                      |
 | `--base-url`        | `UPSTREAM_BASE_URL` | —             | Upstream API base URL                        |
 | `--upstream-format` | `UPSTREAM_FORMAT`   | `openai-chat` | `anthropic`, `openai-chat`, `responses`      |
-| `--vendor`          | —                   | `auto`        | `deepseek`, `openai`, `anthropic`, `auto`    |          | —                   | `auto`        | `deepseek`, `openai`, `anthropic`, `auto`    |
+| `--vendor`          | —                   | `auto`        | `deepseek`, `openai`, `anthropic`, `auto`    |
 | `--apikey`          | `UPSTREAM_API_KEY`  | —             | Upstream API key                             |
 | `--model`           | `UPSTREAM_MODEL`    | —             | Default model override                       |
-| `-p, --port`        | `PORT`              | `9090`        | Server port                                  |
-| `--host`            | `HOST`              | `0.0.0.0`     | Server host                                  |
-| `--log`             | `RUST_LOG`          | `info`        | `trace`, `debug`, `info`, `warn`, `error`    |
-| `--log-file`        | —                   | —             | Write JSON logs to file                      |
-| `--log-http`        | —                   | —             | Log HTTP request/response bodies             |
+| `-a, --addr`        | `ADDR`              | `0.0.0.0:9090`| Server listen address                        |
+| `--log-level`       | `RUST_LOG`          | `info`        | `trace`, `debug`, `info`, `warn`, `error`    |
+| `--log-dir`         | `LOG_DIR`           | `$DATA_DIR/logs`| Write JSON logs to directory (daily rotate) |
+| `--logtostderr`     | `LOGTOSTDERROR`     | `true`        | Log to stderr (set false for file-only)      |
+| `--alsologtostderr` | `ALSOLOGTOSTDERROR` | `false`       | Log to stderr as well as files               |
+| `--access-log`      | —                   | —             | Log HTTP request/response bodies             |
+| `--access-log-dir`  | `ACCESS_LOG_DIR`    | `$LOG_DIR`    | Write HTTP access logs to directory (JSON)   |
 | `--drop-images`     | —                   | —             | Strip images from requests                   |
 | `--no-cors`         | —                   | —             | Disable CORS headers                         |
 
