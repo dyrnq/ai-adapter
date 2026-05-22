@@ -150,16 +150,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all artifacts
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: "*"
+          merge-multiple: false
 
       - name: Prepare release assets
         shell: bash
         run: |
           mkdir -p release-assets
-          find artifacts -type f -exec cp {} release-assets/ \;
+          # Copy only binary artifacts, exclude docker metadata
+          find artifacts -type f -not -name '*.dockerbuild' -not -name '*.json' -exec cp {} release-assets/ \;
           cd release-assets
           sha256sum * > sha256sums.txt
 
