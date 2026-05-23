@@ -29,6 +29,10 @@ struct Cli {
     #[arg(long = "apikey")]
     api_key: Option<String>,
 
+    /// Prefer client-supplied API key (Authorization header) over config key
+    #[arg(long = "prefer-client-key")]
+    prefer_client_key: bool,
+
     /// Default model to use
     #[arg(long = "model")]
     model: Option<String>,
@@ -222,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
         cli.log_http,
         cli.vendor.as_deref(),
         cli.access_log_dir.as_deref(),
+        cli.prefer_client_key,
     )?;
 
     config.print();

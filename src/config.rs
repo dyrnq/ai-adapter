@@ -94,6 +94,7 @@ pub struct RuntimeConfig {
     pub base_url: String,
     pub upstream_format: UpstreamFormat,
     pub api_key: Option<String>,
+    pub prefer_client_key: bool,
     pub model: Option<String>,
     pub api_version: Option<String>,
     pub drop_images: bool,
@@ -121,6 +122,7 @@ impl Default for RuntimeConfig {
             base_url: "https://api.openai.com".to_string(),
             upstream_format: UpstreamFormat::OpenAiChat,
             api_key: None,
+            prefer_client_key: false,
             model: None,
             api_version: None,
             drop_images: false,
@@ -186,6 +188,7 @@ pub fn load_config(
     cli_log_http: bool,
     cli_vendor: Option<&str>,
     cli_access_log_dir: Option<&str>,
+    cli_prefer_client_key: bool,
 ) -> anyhow::Result<RuntimeConfig> {
     let mut config = RuntimeConfig::default();
 
@@ -277,6 +280,7 @@ pub fn load_config(
         config.addr = addr.to_string();
     }
     config.drop_images = cli_drop_images;
+    config.prefer_client_key = cli_prefer_client_key;
     if cli_no_cors {
         config.cors = false;
     }

@@ -163,11 +163,13 @@ async fn handle_compact(
         }
     };
 
-    let api_key = state
-        .config
-        .api_key
-        .clone()
-        .or_else(|| extract_bearer(&headers));
+    let api_key = if state.config.prefer_client_key {
+        extract_bearer(&headers)
+            .or_else(|| state.config.api_key.clone())
+    } else {
+        state.config.api_key.clone()
+            .or_else(|| extract_bearer(&headers))
+    };
 
     // Build a summarization prompt from the conversation history
     let conversation_text = build_compact_prompt(&compact_req);
@@ -468,11 +470,13 @@ async fn handle_chat_completions(
 
     // Determine upstream URL
     let upstream_url = build_upstream_url(&state.config.base_url, "/v1/responses");
-    let api_key = state
-        .config
-        .api_key
-        .clone()
-        .or_else(|| extract_bearer(&headers));
+    let api_key = if state.config.prefer_client_key {
+        extract_bearer(&headers)
+            .or_else(|| state.config.api_key.clone())
+    } else {
+        state.config.api_key.clone()
+            .or_else(|| extract_bearer(&headers))
+    };
 
     // Build upstream request
     let mut upstream_headers = HeaderMap::new();
@@ -670,11 +674,13 @@ async fn handle_responses(
 
     let is_stream = responses_req.stream.unwrap_or(false);
     tracing::debug!("handle_responses: stream={}, body={}", is_stream, &body);
-    let api_key = state
-        .config
-        .api_key
-        .clone()
-        .or_else(|| extract_bearer(&headers));
+    let api_key = if state.config.prefer_client_key {
+        extract_bearer(&headers)
+            .or_else(|| state.config.api_key.clone())
+    } else {
+        state.config.api_key.clone()
+            .or_else(|| extract_bearer(&headers))
+    };
 
     // Save session data from Codex requests (only when session-id header present)
     if let Some(ref sid) = session_id {
@@ -1218,11 +1224,13 @@ async fn passthrough_request(
     let path = uri.path();
     let upstream_url = format!("{}{}", state.config.base_url.trim_end_matches('/'), path);
 
-    let api_key = state
-        .config
-        .api_key
-        .clone()
-        .or_else(|| extract_bearer(headers));
+    let api_key = if state.config.prefer_client_key {
+        extract_bearer(headers)
+            .or_else(|| state.config.api_key.clone())
+    } else {
+        state.config.api_key.clone()
+            .or_else(|| extract_bearer(headers))
+    };
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
