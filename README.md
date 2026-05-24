@@ -71,6 +71,7 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 | `--upstream-format` | `UPSTREAM_FORMAT`   | `openai-chat`          | `anthropic`, `openai-chat`, `responses`      |
 | `--vendor`          | —                   | `auto`                 | `deepseek`, `openai`, `anthropic`, `auto`    |
 | `--apikey`          | `UPSTREAM_API_KEY`  | —                      | Upstream API key                             |
+| `--prefer-client-key`| —                   | `false`                | Prefer Authorization header over config key  |
 | `--model`           | `UPSTREAM_MODEL`    | —                      | Default model override                       |
 | `-a, --addr`        | `ADDR`              | `0.0.0.0:9090`         | Server listen address                        |
 | `--log-level`       | `RUST_LOG`          | `info`                 | `trace`, `debug`, `info`, `warn`, `error`    |
@@ -81,6 +82,7 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 | `--access-log-dir`  | `ACCESS_LOG_DIR`    | `$LOG_DIR`             | Access log directory (defaults to LOG_DIR)   |
 | `--drop-images`     | —                   | `false`                | Strip images from requests                   |
 | `--no-cors`         | —                   | `false`                | Disable CORS headers                         |
+| —                   | `TRUNCATE_REASONING`| `false`                | Truncate reasoning content >32KB when enabled|
 
 ## API Endpoints
 
