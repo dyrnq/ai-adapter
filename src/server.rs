@@ -164,10 +164,12 @@ async fn handle_compact(
     };
 
     let api_key = if state.config.prefer_client_key {
-        extract_bearer(&headers)
-            .or_else(|| state.config.api_key.clone())
+        extract_bearer(&headers).or_else(|| state.config.api_key.clone())
     } else {
-        state.config.api_key.clone()
+        state
+            .config
+            .api_key
+            .clone()
             .or_else(|| extract_bearer(&headers))
     };
 
@@ -471,10 +473,12 @@ async fn handle_chat_completions(
     // Determine upstream URL
     let upstream_url = build_upstream_url(&state.config.base_url, "/v1/responses");
     let api_key = if state.config.prefer_client_key {
-        extract_bearer(&headers)
-            .or_else(|| state.config.api_key.clone())
+        extract_bearer(&headers).or_else(|| state.config.api_key.clone())
     } else {
-        state.config.api_key.clone()
+        state
+            .config
+            .api_key
+            .clone()
             .or_else(|| extract_bearer(&headers))
     };
 
@@ -660,6 +664,10 @@ async fn handle_responses(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    if body.trim().is_empty() {
+        return axum::Json(serde_json::json!({})).into_response();
+    }
+
     let responses_req: ResponsesRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(e) => {
@@ -675,16 +683,23 @@ async fn handle_responses(
     let is_stream = responses_req.stream.unwrap_or(false);
     tracing::debug!("handle_responses: stream={}, body={}", is_stream, &body);
     let api_key = if state.config.prefer_client_key {
-        extract_bearer(&headers)
-            .or_else(|| state.config.api_key.clone())
+        extract_bearer(&headers).or_else(|| state.config.api_key.clone())
     } else {
-        state.config.api_key.clone()
+        state
+            .config
+            .api_key
+            .clone()
             .or_else(|| extract_bearer(&headers))
     };
 
-    // Save session data from Codex requests (only when session-id header present)
+    // Save session data asynchronously to avoid blocking the request handler
     if let Some(ref sid) = session_id {
-        let _ = state.session_store.save(sid, &body).await;
+        let store = state.session_store.clone();
+        let sid = sid.clone();
+        let body = body.clone();
+        tokio::spawn(async move {
+            let _ = store.save(&sid, &body).await;
+        });
     }
 
     match state.config.upstream_format {
@@ -790,12 +805,19 @@ async fn handle_responses_via_chat(
         let sid = session_id.as_deref().unwrap_or("unknown");
         match state.reason_cache.get(sid, prev_id).await {
             Ok(Some(r)) => {
+                let len = r.len();
+                let truncated = if state.config.truncate_reasoning && len > 32768 {
+                    tracing::warn!("Truncated reasoning from {} to 32KB", len);
+                    r[..32768].to_string()
+                } else {
+                    r
+                };
                 tracing::debug!(
                     "Injected {} bytes of reasoning from previous_response_id={}",
-                    r.len(),
+                    truncated.len(),
                     prev_id
                 );
-                Some(r)
+                Some(truncated)
             }
             Ok(None) => None,
             Err(e) => {
@@ -1225,10 +1247,12 @@ async fn passthrough_request(
     let upstream_url = format!("{}{}", state.config.base_url.trim_end_matches('/'), path);
 
     let api_key = if state.config.prefer_client_key {
-        extract_bearer(headers)
-            .or_else(|| state.config.api_key.clone())
+        extract_bearer(headers).or_else(|| state.config.api_key.clone())
     } else {
-        state.config.api_key.clone()
+        state
+            .config
+            .api_key
+            .clone()
             .or_else(|| extract_bearer(headers))
     };
 

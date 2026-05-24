@@ -99,6 +99,7 @@ pub struct RuntimeConfig {
     pub api_version: Option<String>,
     pub drop_images: bool,
     pub backfill_reasoning: bool,
+    pub truncate_reasoning: bool,
     pub cors: bool,
     pub log_http: bool,
     pub access_log_dir: Option<String>,
@@ -127,6 +128,7 @@ impl Default for RuntimeConfig {
             api_version: None,
             drop_images: false,
             backfill_reasoning: false,
+            truncate_reasoning: false,
             cors: true,
             log_http: false,
             access_log_dir: None,
@@ -163,6 +165,7 @@ impl RuntimeConfig {
         println!("api_key:          {}", masked_key);
         println!("drop_images:      {}", self.drop_images);
         println!("backfill_reason:  {}", self.backfill_reasoning);
+        println!("truncate_reason:   {}", self.truncate_reasoning);
         println!("cors:             {}", self.cors);
         println!("log_http:         {}", self.log_http);
         if let Some(ref d) = self.access_log_dir {
@@ -260,6 +263,11 @@ pub fn load_config(
 
     // Load .env file if exists
     let _ = dotenvy::dotenv().ok();
+
+    // Apply env var for reasoning truncation
+    if std::env::var("TRUNCATE_REASONING").as_deref() == Ok("true") {
+        config.truncate_reasoning = true;
+    }
 
     // 3. Apply CLI overrides (highest priority)
     if let Some(url) = cli_base_url {
