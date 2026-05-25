@@ -13,7 +13,7 @@ pub async fn run(endpoint: &str, subcommand: &str) -> anyhow::Result<()> {
             } else {
                 println!("Sessions:");
                 for s in sessions {
-                    println!("  {}  {} bytes", s["id"].as_str().unwrap_or("?"), s["size"]);
+                    println!("  {}", s.as_str().unwrap_or("?"));
                 }
             }
             println!("Total: {}", sessions.len());

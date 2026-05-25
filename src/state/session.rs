@@ -4,7 +4,9 @@ use tokio::sync::RwLock;
 
 const TABLE: TableDefinition<&str, &str> = TableDefinition::new("session");
 
-/// Thread-safe session store.
+/// Records session_ids seen by the proxy.
+/// No longer stores request bodies — just tracks which sessions exist
+/// for the `session ls` command.
 #[derive(Clone)]
 pub struct SessionStore {
     db: Arc<RwLock<Database>>,
@@ -15,7 +17,20 @@ impl SessionStore {
         Self { db }
     }
 
-    pub async fn list(&self) -> Vec<serde_json::Value> {
+    /// Record a session_id (value is timestamp, overwrites on repeat).
+    pub async fn record(&self, session_id: &str) -> anyhow::Result<()> {
+        let db = self.db.read().await;
+        let write_txn = db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE)?;
+            table.insert(session_id, "")?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    /// List all session ids.
+    pub async fn list(&self) -> Vec<String> {
         let db = self.db.read().await;
         let read_txn = match db.begin_read() {
             Ok(tx) => tx,
@@ -31,12 +46,7 @@ impl SessionStore {
             .into_iter()
             .flatten()
             .filter_map(|r| r.ok())
-            .map(|(k, v)| {
-                serde_json::json!({
-                    "id": k.value(),
-                    "size": v.value().len(),
-                })
-            })
+            .map(|(k, _)| k.value().to_string())
             .collect()
     }
 }

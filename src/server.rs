@@ -915,6 +915,11 @@ async fn handle_responses(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    // Record session_id for session ls command
+    if let Some(ref sid) = session_id {
+        let _ = state.session_store.record(sid).await;
+    }
+
     if body.trim().is_empty() {
         return axum::Json(serde_json::json!({})).into_response();
     }
