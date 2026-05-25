@@ -264,7 +264,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Bind and serve
     let listener = tokio::net::TcpListener::bind(&config.addr).await?;
-    tracing::info!("Listening on {}", config.addr);
+    tracing::info!("Listening on {} (pid={})", config.addr, std::process::id());
 
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())

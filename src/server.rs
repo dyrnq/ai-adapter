@@ -177,14 +177,16 @@ async fn handle_compact(
     let conversation_text = build_compact_prompt(&compact_req);
 
     // Determine how to call the upstream based on format
-    match state.config.upstream_format {
+    let result = match state.config.upstream_format {
         crate::config::UpstreamFormat::Anthropic => {
             compact_via_anthropic(&state, &compact_req, &conversation_text, api_key).await
         }
         crate::config::UpstreamFormat::OpenAiChat | crate::config::UpstreamFormat::Responses => {
             compact_via_chat(&state, &compact_req, &conversation_text, api_key).await
         }
-    }
+    };
+
+    result
 }
 
 fn build_compact_prompt(req: &CompactRequest) -> String {
@@ -466,12 +468,6 @@ async fn handle_chat_completions(
     };
 
     let is_stream = chat_req.stream.unwrap_or(false);
-
-    // Convert to Responses API format
-    let responses_req = convert_chat_to_responses(&chat_req);
-
-    // Determine upstream URL
-    let upstream_url = build_upstream_url(&state.config.base_url, "/v1/responses");
     let api_key = if state.config.prefer_client_key {
         extract_bearer(&headers).or_else(|| state.config.api_key.clone())
     } else {
@@ -482,6 +478,27 @@ async fn handle_chat_completions(
             .or_else(|| extract_bearer(&headers))
     };
 
+    // Route based on upstream format
+    match state.config.upstream_format {
+        UpstreamFormat::OpenAiChat => {
+            // Chat -> Chat passthrough: send directly to upstream /v1/chat/completions
+            return handle_chat_passthrough(&state, &chat_req, is_stream, api_key).await;
+        }
+        UpstreamFormat::Responses => {
+            // Chat -> Responses: convert and send to upstream /v1/responses
+            // (original Direction 1 logic)
+        }
+        UpstreamFormat::Anthropic => {
+            // Chat -> Anthropic: convert and send to upstream /v1/messages
+            return handle_chat_via_anthropic(&state, &chat_req, is_stream, api_key).await;
+        }
+    }
+
+    // Convert to Responses API format
+    let responses_req = convert_chat_to_responses(&chat_req);
+
+    // Determine upstream URL
+    let upstream_url = build_upstream_url(&state.config.base_url, "/v1/responses");
     // Build upstream request
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -649,6 +666,240 @@ async fn handle_chat_completions(
     }
 }
 
+// ── handle_chat_passthrough: ChatCompletions -> upstream /v1/chat/completions ──
+async fn handle_chat_passthrough(
+    state: &AppState,
+    req: &ChatCompletionsRequest,
+    is_stream: bool,
+    api_key: Option<String>,
+) -> Response {
+    let upstream_url = build_upstream_url(&state.config.base_url, "/v1/chat/completions");
+
+    let mut upstream_headers = HeaderMap::new();
+    upstream_headers.insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("application/json"),
+    );
+    if let Some(ref key) = api_key {
+        if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
+            upstream_headers.insert(HeaderName::from_static("authorization"), val);
+        }
+    }
+
+    let body_json = serde_json::to_string(req).unwrap_or_default();
+    tracing::debug!("Chat passthrough: POST {}", upstream_url);
+
+    let upstream_resp = match state
+        .client
+        .post(&upstream_url)
+        .headers(upstream_headers)
+        .body(body_json)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
+                    .to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    let status = upstream_resp.status();
+    if !status.is_success() {
+        let error_body = upstream_resp.text().await.unwrap_or_default();
+        return (
+            status,
+            serde_json::json!({"error": {"message": format!("Upstream {}: {}", status.as_u16(), error_body)}}).to_string(),
+        )
+            .into_response();
+    }
+
+    if is_stream {
+        let stream = upstream_resp.bytes_stream();
+        let stream = stream.map(|r| match r {
+            Ok(bytes) => Ok(bytes.to_vec()),
+            Err(e) => Err(e),
+        });
+        let (tx, rx) = tokio::sync::mpsc::channel::<
+            std::result::Result<axum::response::sse::Event, std::convert::Infallible>,
+        >(32);
+
+        tokio::spawn(async move {
+            let mut buffer = String::new();
+            futures::pin_mut!(stream);
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(bytes) => {
+                        if let Ok(s) = String::from_utf8(bytes) {
+                            buffer.push_str(&s);
+                            while let Some(pos) = buffer.find("\n\n") {
+                                let chunk = buffer[..pos].to_string();
+                                buffer = buffer[pos + 2..].to_string();
+                                for line in chunk.lines() {
+                                    let trimmed = line.trim();
+                                    if !trimmed.is_empty() {
+                                        let _ = tx
+                                            .send(Ok(
+                                                axum::response::sse::Event::default().data(trimmed)
+                                            ))
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        Sse::new(stream).into_response()
+    } else {
+        let body = match upstream_resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    serde_json::json!({"error": {"message": format!("Read error: {}", e)}})
+                        .to_string(),
+                )
+                    .into_response();
+            }
+        };
+        let mut response = Response::new(Body::from(body));
+        *response.status_mut() = status;
+        response.headers_mut().insert(
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("application/json"),
+        );
+        response
+    }
+}
+
+// ── handle_chat_via_anthropic: ChatCompletions -> upstream /v1/messages ──
+async fn handle_chat_via_anthropic(
+    state: &AppState,
+    req: &ChatCompletionsRequest,
+    is_stream: bool,
+    api_key: Option<String>,
+) -> Response {
+    // Two-step conversion: Chat -> Responses -> Anthropic
+    let responses_req = convert_chat_to_responses(req);
+    let anthropic_req = convert_responses_to_anthropic(&responses_req);
+
+    let upstream_url = build_upstream_url(&state.config.base_url, "/v1/messages");
+
+    let mut upstream_headers = HeaderMap::new();
+    upstream_headers.insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("application/json"),
+    );
+    upstream_headers.insert(
+        HeaderName::from_static("anthropic-version"),
+        HeaderValue::from_static("2023-06-01"),
+    );
+    if let Some(ref key) = api_key {
+        if let Ok(val) = HeaderValue::from_str(key) {
+            upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+        }
+    }
+
+    let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
+    tracing::debug!("Chat->Anthropic: POST {}", upstream_url);
+
+    let upstream_resp = match state
+        .client
+        .post(&upstream_url)
+        .headers(upstream_headers)
+        .body(body_json)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
+                    .to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    let status = upstream_resp.status();
+    if !status.is_success() {
+        let error_body = upstream_resp.text().await.unwrap_or_default();
+        return (
+            status,
+            serde_json::json!({"error": {"message": format!("Upstream {}: {}", status.as_u16(), error_body)}}).to_string(),
+        )
+            .into_response();
+    }
+
+    if is_stream {
+        // For streaming, passthrough the SSE stream
+        let stream = upstream_resp.bytes_stream();
+        let (tx, rx) = tokio::sync::mpsc::channel::<
+            std::result::Result<axum::response::sse::Event, std::convert::Infallible>,
+        >(32);
+
+        tokio::spawn(async move {
+            let mut buffer = String::new();
+            futures::pin_mut!(stream);
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(bytes) => {
+                        if let Ok(s) = String::from_utf8(bytes.to_vec()) {
+                            buffer.push_str(&s);
+                            while let Some(pos) = buffer.find("\n\n") {
+                                let chunk = buffer[..pos].to_string();
+                                buffer = buffer[pos + 2..].to_string();
+                                for line in chunk.lines() {
+                                    let trimmed = line.trim();
+                                    if !trimmed.is_empty() {
+                                        let _ = tx
+                                            .send(Ok(
+                                                axum::response::sse::Event::default().data(trimmed)
+                                            ))
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        Sse::new(stream).into_response()
+    } else {
+        // Non-stream: passthrough the response body as-is
+        match upstream_resp.bytes().await {
+            Ok(body) => {
+                let mut response = Response::new(Body::from(body));
+                *response.status_mut() = status;
+                response.headers_mut().insert(
+                    HeaderName::from_static("content-type"),
+                    HeaderValue::from_static("application/json"),
+                );
+                response
+            }
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                serde_json::json!({"error": {"message": format!("Read error: {}", e)}}).to_string(),
+            )
+                .into_response(),
+        }
+    }
+}
+
 // ============================================================
 // /v1/responses -> upstream (Responses or Chat or Anthropic)
 // ============================================================
@@ -692,52 +943,33 @@ async fn handle_responses(
             .or_else(|| extract_bearer(&headers))
     };
 
-    // Save session data asynchronously to avoid blocking the request handler
-    if let Some(ref sid) = session_id {
-        let store = state.session_store.clone();
-        let sid = sid.clone();
-        let body = body.clone();
-        tokio::spawn(async move {
-            let _ = store.save(&sid, &body).await;
-        });
-    }
-
+    // Route based on upstream format
     match state.config.upstream_format {
-        UpstreamFormat::Responses => {
-            // Pass-through to Responses API
-            handle_responses_passthrough(&state, &responses_req, is_stream, api_key).await
+        UpstreamFormat::Anthropic => {
+            return handle_responses_via_anthropic(
+                &state,
+                &responses_req,
+                is_stream,
+                api_key,
+                session_id,
+            )
+            .await;
         }
         UpstreamFormat::OpenAiChat => {
-            // Convert to Chat Completions
-            handle_responses_via_chat(
+            return handle_responses_via_chat(
                 &state,
                 &responses_req,
                 is_stream,
                 api_key,
-                session_id.clone(),
+                session_id,
             )
-            .await
+            .await;
         }
-        UpstreamFormat::Anthropic => {
-            // Convert to Anthropic Messages
-            handle_responses_via_anthropic(
-                &state,
-                &responses_req,
-                is_stream,
-                api_key,
-                session_id.clone(),
-            )
-            .await
+        UpstreamFormat::Responses => {
+            // Passthrough: send Responses request directly to upstream
         }
     }
-}
 
-async fn handle_responses_passthrough(
-    state: &AppState,
-    req: &ResponsesRequest,
-    _is_stream: bool,
-    api_key: Option<String>,
-) -> Response {
     let upstream_url = build_upstream_url(&state.config.base_url, "/v1/responses");
 
     let mut upstream_headers = HeaderMap::new();
@@ -751,7 +983,7 @@ async fn handle_responses_passthrough(
         }
     }
 
-    let body_json = serde_json::to_string(req).unwrap_or_default();
+    let body_json = serde_json::to_string(&responses_req).unwrap_or_default();
 
     match state
         .client
@@ -1008,6 +1240,28 @@ async fn handle_responses_via_chat(
                     .into_response();
                 }
             };
+
+        // Save assistant response to history for prefix caching
+        if let Some(_sid) = session_id {
+            if let Some(choice) = chat_resp.choices.first() {
+                if let Some(ref msg) = choice.message {
+                    let assist_msg = crate::types::chat::ChatMessage {
+                        role: "assistant".into(),
+                        content: msg.content.clone(),
+                        name: None,
+                        tool_calls: msg.tool_calls.clone(),
+                        tool_call_id: None,
+                        refusal: msg.refusal.clone(),
+                        reasoning_content: None,
+                    };
+                    let has_content = assist_msg.content.is_some();
+                    let has_tools = assist_msg.tool_calls.is_some();
+                    if has_content || has_tools {
+                        // assistant message saved (no history store)
+                    }
+                }
+            }
+        }
 
         let responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
         (
@@ -1332,7 +1586,7 @@ async fn send_sse(
 
 /// Build upstream URL smartly: if base_url already contains the target path, use as-is.
 /// Otherwise append the path, avoiding double-segment issues like /v1/v1/chat/completions.
-fn build_upstream_url(base_url: &str, target_path: &str) -> String {
+pub fn build_upstream_url(base_url: &str, target_path: &str) -> String {
     let base = base_url.trim_end_matches('/');
 
     // If base already ends with the target path (or a sub-path of it), use as-is
