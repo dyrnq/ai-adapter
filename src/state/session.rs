@@ -20,6 +20,7 @@ impl SessionStore {
         &self.db
     }
 
+    #[allow(dead_code)]
     pub async fn save(&self, session_id: &str, content: &str) -> anyhow::Result<()> {
         let db = self.db.read().await;
         let write_txn = db.begin_write()?;
