@@ -122,7 +122,7 @@ pub fn convert_responses_to_chat(
         stream: responses.stream,
         max_tokens: None,
         max_completion_tokens: responses.max_output_tokens,
-        temperature: Some(0.3),
+        temperature: Some(1.0),
         top_p: Some(responses.top_p.unwrap_or(0.95)),
         // xiaomimimo tool calling docs explicitly use thinking:disabled
         thinking: Some(ThinkingConfig {
