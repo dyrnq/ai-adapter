@@ -182,6 +182,10 @@ jobs:
           sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Explicit auth to avoid pull rate limit — buildx doesn't inherit docker/login-action
+          secrets: |
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
+            DOCKER_PASSWORD=${{ secrets.DOCKER_PASSWORD }}
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
 
