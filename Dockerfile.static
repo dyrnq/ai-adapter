@@ -9,7 +9,7 @@
 #      chmod +x bin/amd64/ai-adapter bin/arm64/ai-adapter
 #   3. docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.static .
 
-FROM quay.io/alpine:3.21
+FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata
 
