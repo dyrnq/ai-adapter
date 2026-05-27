@@ -15,7 +15,10 @@ Codex / Client          AI Adapter :9090          Upstream
 (Responses API)        openai/chat.rs
 
 /v1/responses   ──▶    translate/            ──▶  Anthropic
-(Responses API)        anthropic/anthropic.rs
+(Responses API)        anthropic/convert.rs
+
+/v1/responses   ──▶    translate/            ──▶  XiaomiMimo Chat
+(Responses API)        xiaomimimo/chat.rs         (+ Anthropic)
 ```
 
 ## Features
@@ -69,7 +72,7 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 | `-c, --config`      | —                   | —                      | Config file (YAML/JSON)                      |
 | `--base-url`        | `UPSTREAM_BASE_URL` | —                      | Upstream API base URL                        |
 | `--upstream-format` | `UPSTREAM_FORMAT`   | `openai-chat`          | `anthropic`, `openai-chat`, `responses`      |
-| `--vendor`          | —                   | `auto`                 | `deepseek`, `openai`, `anthropic`, `auto`    |
+| `--vendor`          | —                   | `auto`                 | `deepseek`, `openai`, `anthropic`, `xiaomimimo`, `auto`    |
 | `--apikey`          | `UPSTREAM_API_KEY`  | —                      | Upstream API key                             |
 | `--prefer-client-key`| —                   | `false`                | Prefer Authorization header over config key  |
 | `--model`           | `UPSTREAM_MODEL`    | —                      | Default model override                       |
@@ -104,6 +107,8 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 | DeepSeek   | Anthropic| disabled | → assistant    | nested      | tool_use/tool_result merge          |
 | OpenAI     | Chat     | N/A      | preserved      | nested      | standard                            |
 | Anthropic  | Anthropic| N/A      | → assistant    | nested      | standard                            |
+| XiaomiMimo | Chat     | none     | → system       | flat        | api-key auth, tp-/sk- keys, token-plan support |
+| XiaomiMimo | Anthropic| none     | → assistant    | nested      | shared sanitization with DeepSeek   |
 
 ## Stream Event Mapping
 
