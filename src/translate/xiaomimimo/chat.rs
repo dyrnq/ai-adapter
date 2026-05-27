@@ -67,8 +67,8 @@ pub fn convert_responses_to_chat(
                     }]),
                     tool_call_id: None,
                     refusal: None,
-                    // xiaomimimo requires reasoning_content on assistant tool messages
-                    reasoning_content: Some(String::new()),
+                    // No reasoning required when thinking:disabled
+                    reasoning_content: None,
                 });
             }
             ResponsesInputItem::FunctionCallOutput {

@@ -462,6 +462,7 @@ pub struct ChatStreamToResponsesTranslator {
     seq: u32,
     created: i64,
     pub reasoning_content: String,
+    pub strip_xiaomimimo_markers: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -490,6 +491,7 @@ impl ChatStreamToResponsesTranslator {
             seq: 0,
             created: Self::now_unix(),
             reasoning_content: String::new(),
+            strip_xiaomimimo_markers: false,
         }
     }
 
@@ -610,14 +612,22 @@ impl ChatStreamToResponsesTranslator {
                     if let Some(content) = delta.get("content") {
                         if let Some(text) = content.as_str() {
                             if !text.is_empty() {
-                                self.current_text.push_str(text);
-                                events.push(ResponsesStreamEvent::OutputTextDelta {
-                                    output_index: self.output_index,
-                                    content_index: 0,
-                                    delta: text.to_string(),
-                                    item_id: Some(self.item_id.clone()),
-                                    sequence_number: self.next_seq(),
-                                });
+                                let clean = if self.strip_xiaomimimo_markers {
+                                    text.replace("[[REASONING_SUMMARY]]", "")
+                                        .replace("[[REASONING_DIVIDER]]", "")
+                                } else {
+                                    text.to_string()
+                                };
+                                if !clean.is_empty() {
+                                    self.current_text.push_str(&clean);
+                                    events.push(ResponsesStreamEvent::OutputTextDelta {
+                                        output_index: self.output_index,
+                                        content_index: 0,
+                                        delta: clean,
+                                        item_id: Some(self.item_id.clone()),
+                                        sequence_number: self.next_seq(),
+                                    });
+                                }
                             }
                         }
                     }

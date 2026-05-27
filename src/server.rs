@@ -1200,6 +1200,8 @@ async fn handle_responses_via_chat(
         tokio::spawn(async move {
             let mut translator = ChatStreamToResponsesTranslator::new(&model);
             translator.response_id = response_id.clone();
+            translator.strip_xiaomimimo_markers =
+                matches!(vendor, crate::config::UpstreamVendor::XiaomiMimo);
             let mut buffer = String::new();
 
             futures::pin_mut!(stream);
@@ -1303,7 +1305,22 @@ async fn handle_responses_via_chat(
                 }
             };
 
-        let responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
+        let mut responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
+
+        // Strip xiaomimimo reasoning markers from output text
+        if matches!(state.config.vendor, crate::config::UpstreamVendor::XiaomiMimo) {
+            for item in &mut responses_resp.output {
+                if let ResponsesOutputItem::Message { content, .. } = item {
+                    for part in content {
+                        if let ResponsesContentPart::OutputText { text } = part {
+                            *text = text
+                                .replace("[[REASONING_SUMMARY]]", "")
+                                .replace("[[REASONING_DIVIDER]]", "");
+                        }
+                    }
+                }
+            }
+        }
 
         // Save reasoning to cache for multi-turn (non-stream path)
         if let Some(ref sid) = session_id {
