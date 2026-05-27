@@ -30,7 +30,8 @@ use crate::translate::{
 };
 use crate::types::chat::ChatCompletionsRequest;
 use crate::types::responses::{
-    CompactRequest, CompactResponse, ResponsesRequest, ResponsesStreamEvent,
+    CompactRequest, CompactResponse, ResponsesContentPart, ResponsesOutputItem, ResponsesRequest,
+    ResponsesStreamEvent,
 };
 
 /// Shared application state
@@ -1197,11 +1198,14 @@ async fn handle_responses_via_chat(
         let reason_cache = state.reason_cache.clone();
         let response_id = format!("resp_{}", uuid::Uuid::new_v4());
         let session_id_for_save = session_id.clone();
+        let is_xiaomimimo = matches!(
+            state.config.vendor,
+            crate::config::UpstreamVendor::XiaomiMimo
+        );
         tokio::spawn(async move {
             let mut translator = ChatStreamToResponsesTranslator::new(&model);
             translator.response_id = response_id.clone();
-            translator.strip_xiaomimimo_markers =
-                matches!(vendor, crate::config::UpstreamVendor::XiaomiMimo);
+            translator.strip_xiaomimimo_markers = is_xiaomimimo;
             let mut buffer = String::new();
 
             futures::pin_mut!(stream);
@@ -1308,7 +1312,10 @@ async fn handle_responses_via_chat(
         let mut responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
 
         // Strip xiaomimimo reasoning markers from output text
-        if matches!(state.config.vendor, crate::config::UpstreamVendor::XiaomiMimo) {
+        if matches!(
+            state.config.vendor,
+            crate::config::UpstreamVendor::XiaomiMimo
+        ) {
             for item in &mut responses_resp.output {
                 if let ResponsesOutputItem::Message { content, .. } = item {
                     for part in content {
@@ -1459,6 +1466,10 @@ async fn handle_responses_via_anthropic(
         let reason_cache = state.reason_cache.clone();
         let response_id = format!("resp_{}", uuid::Uuid::new_v4());
         let session_id_for_save = session_id.clone();
+        let _is_xiaomimimo = matches!(
+            state.config.vendor,
+            crate::config::UpstreamVendor::XiaomiMimo
+        );
         tokio::spawn(async move {
             let mut translator = AnthropicStreamTranslator::new(&model);
             translator.response_id = response_id.clone();
