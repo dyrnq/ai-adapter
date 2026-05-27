@@ -2,8 +2,13 @@ use crate::types::chat::*;
 use crate::types::responses::*;
 
 /// Convert Responses request to Chat Completions for xiaomimimo/mimo-v2.5-pro.
-/// Key differences from DeepSeek: no forced thinking:disabled, uses xiaomimimo defaults.
-pub fn convert_responses_to_chat(responses: &ResponsesRequest) -> ChatCompletionsRequest {
+/// - thinking enabled for better tool calling
+/// - injects previous_reasoning into the last assistant tool message
+///   to satisfy xiaomimimo's reasoning_content requirement
+pub fn convert_responses_to_chat(
+    responses: &ResponsesRequest,
+    previous_reasoning: Option<String>,
+) -> ChatCompletionsRequest {
     let mut messages: Vec<ChatMessage> = Vec::new();
 
     // instructions → system message
@@ -62,7 +67,8 @@ pub fn convert_responses_to_chat(responses: &ResponsesRequest) -> ChatCompletion
                     }]),
                     tool_call_id: None,
                     refusal: None,
-                    reasoning_content: None,
+                    // xiaomimimo requires reasoning_content on assistant tool messages
+                    reasoning_content: Some(String::new()),
                 });
             }
             ResponsesInputItem::FunctionCallOutput {
@@ -77,6 +83,16 @@ pub fn convert_responses_to_chat(responses: &ResponsesRequest) -> ChatCompletion
                     refusal: None,
                     reasoning_content: None,
                 });
+            }
+        }
+    }
+
+    // Inject previous_reasoning into the last assistant tool message
+    if let Some(reasoning) = previous_reasoning {
+        for msg in messages.iter_mut().rev() {
+            if msg.role == "assistant" && msg.tool_calls.is_some() {
+                msg.reasoning_content = Some(reasoning);
+                break;
             }
         }
     }
@@ -108,16 +124,19 @@ pub fn convert_responses_to_chat(responses: &ResponsesRequest) -> ChatCompletion
         max_completion_tokens: responses.max_output_tokens,
         temperature: Some(responses.temperature.unwrap_or(1.0)),
         top_p: Some(responses.top_p.unwrap_or(0.95)),
-        thinking: None,
+        // xiaomimimo tool calling docs explicitly use thinking:disabled
+        thinking: Some(ThinkingConfig {
+            thinking_type: "disabled".to_string(),
+        }),
         stop: None,
         n: Some(1),
         seed: None,
-        frequency_penalty: None,
-        presence_penalty: None,
+        frequency_penalty: Some(0.0),
+        presence_penalty: Some(0.0),
         logprobs: None,
         top_logprobs: None,
         tools: chat_tools,
-        tool_choice: None,
+        tool_choice: Some(serde_json::json!("auto")),
         user: None,
         response_format: None,
         stream_options: None,

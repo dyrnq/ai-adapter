@@ -336,13 +336,26 @@ async fn compact_via_anthropic(
         .or_else(|| state.config.model.clone())
         .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
 
-    let anthropic_req = serde_json::json!({
-        "model": model,
-        "max_tokens": 4096,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
-    });
+    let anthropic_req = crate::types::anthropic::AnthropicRequest {
+        model,
+        messages: vec![crate::types::anthropic::AnthropicMessage {
+            role: "user".to_string(),
+            content: crate::types::anthropic::AnthropicMessageContent::String(prompt.to_string()),
+        }],
+        max_tokens: 4096,
+        system: None,
+        metadata: None,
+        stop_sequences: None,
+        stream: Some(false),
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+    };
+
+    let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
 
     let upstream_url = build_upstream_url(&state.config.base_url, "/v1/messages");
 
@@ -369,8 +382,6 @@ async fn compact_via_anthropic(
             }
         }
     }
-
-    let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
 
     match state
         .client
@@ -563,6 +574,7 @@ async fn handle_chat_completions(
         let model = upstream_model.clone();
         tokio::spawn(async move {
             let mut translator = ResponsesStreamToChatTranslator::new(&model);
+            let mut done_sent = false;
 
             let byte_stream = stream.map(|r| match r {
                 Ok(bytes) => Ok(bytes.to_vec()),
@@ -586,7 +598,17 @@ async fn handle_chat_completions(
 
                                 for line in chunk.lines() {
                                     let trimmed = line.trim();
-                                    if trimmed.is_empty() || trimmed == "[DONE]" {
+                                    if trimmed.is_empty() {
+                                        continue;
+                                    }
+                                    if trimmed == "[DONE]" {
+                                        if !done_sent {
+                                            done_sent = true;
+                                            let _ = tx
+                                                .send(Ok(axum::response::sse::Event::default()
+                                                    .data("[DONE]")))
+                                                .await;
+                                        }
                                         continue;
                                     }
                                     if let Some(stripped) = trimmed.strip_prefix("data:") {
@@ -604,12 +626,15 @@ async fn handle_chat_completions(
                                             for chunk_json in chunks {
                                                 if chunk_json == Value::String("[DONE]".to_string())
                                                 {
-                                                    let _ = tx
-                                                        .send(Ok(
-                                                            axum::response::sse::Event::default()
-                                                                .data("[DONE]"),
-                                                        ))
-                                                        .await;
+                                                    if !done_sent {
+                                                        done_sent = true;
+                                                        let _ = tx
+                                                            .send(Ok(
+                                                                axum::response::sse::Event::default()
+                                                                    .data("[DONE]"),
+                                                            ))
+                                                            .await;
+                                                    }
                                                 } else {
                                                     let _ = tx
                                                         .send(Ok(
@@ -765,6 +790,10 @@ async fn handle_chat_passthrough(
                     Err(_) => break,
                 }
             }
+            // Send termination on stream break
+            let _ = tx
+                .send(Ok(axum::response::sse::Event::default().data("[DONE]")))
+                .await;
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -894,6 +923,10 @@ async fn handle_chat_via_anthropic(
                     Err(_) => break,
                 }
             }
+            // Send termination on stream break
+            let _ = tx
+                .send(Ok(axum::response::sse::Event::default().data("[DONE]")))
+                .await;
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -1087,7 +1120,7 @@ async fn handle_responses_via_chat(
 
     let chat_req = match &state.config.vendor {
         crate::config::UpstreamVendor::XiaomiMimo => {
-            crate::translate::xiaomimimo::chat::convert_responses_to_chat(req)
+            crate::translate::xiaomimimo::chat::convert_responses_to_chat(req, previous_reasoning)
         }
         _ => convert_for_deepseek(req, previous_reasoning),
     };
@@ -1270,29 +1303,24 @@ async fn handle_responses_via_chat(
                 }
             };
 
-        // Save assistant response to history for prefix caching
-        if let Some(_sid) = session_id {
-            if let Some(choice) = chat_resp.choices.first() {
+        let responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
+
+        // Save reasoning to cache for multi-turn (non-stream path)
+        if let Some(ref sid) = session_id {
+            for choice in &chat_resp.choices {
                 if let Some(ref msg) = choice.message {
-                    let assist_msg = crate::types::chat::ChatMessage {
-                        role: "assistant".into(),
-                        content: msg.content.clone(),
-                        name: None,
-                        tool_calls: msg.tool_calls.clone(),
-                        tool_call_id: None,
-                        refusal: msg.refusal.clone(),
-                        reasoning_content: None,
-                    };
-                    let has_content = assist_msg.content.is_some();
-                    let has_tools = assist_msg.tool_calls.is_some();
-                    if has_content || has_tools {
-                        // assistant message saved (no history store)
+                    if let Some(ref reasoning) = msg.reasoning_content {
+                        if !reasoning.is_empty() {
+                            let _ = state
+                                .reason_cache
+                                .save(sid, &responses_resp.id, reasoning)
+                                .await;
+                        }
                     }
                 }
             }
         }
 
-        let responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
         (
             StatusCode::OK,
             [("content-type", "application/json")],
@@ -1307,8 +1335,30 @@ async fn handle_responses_via_anthropic(
     req: &ResponsesRequest,
     is_stream: bool,
     api_key: Option<String>,
-    _session_id: Option<String>,
+    session_id: Option<String>,
 ) -> Response {
+    // Look up reasoning from previous response (mirrors Chat path)
+    let _previous_reasoning = if let Some(ref prev_id) = req.previous_response_id {
+        let sid = session_id.as_deref().unwrap_or("unknown");
+        match state.reason_cache.get(sid, prev_id).await {
+            Ok(Some(r)) => {
+                tracing::debug!(
+                    "Anthropic: found {} bytes of reasoning from {}",
+                    r.len(),
+                    prev_id
+                );
+                Some(r)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                tracing::error!("Reasoning cache read error: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let anthropic_req = convert_responses_to_anthropic_for(req, &state.config.vendor);
 
     let upstream_url = build_upstream_url(&state.config.base_url, "/v1/messages");
@@ -1389,8 +1439,12 @@ async fn handle_responses_via_anthropic(
         >(64);
 
         let model = upstream_model.clone();
+        let reason_cache = state.reason_cache.clone();
+        let response_id = format!("resp_{}", uuid::Uuid::new_v4());
+        let session_id_for_save = session_id.clone();
         tokio::spawn(async move {
             let mut translator = AnthropicStreamTranslator::new(&model);
+            translator.response_id = response_id.clone();
             let mut buffer = String::new();
 
             futures::pin_mut!(stream);
@@ -1446,6 +1500,17 @@ async fn handle_responses_via_anthropic(
                 };
                 send_sse(&tx, &event).await;
             }
+
+            // Save reasoning content to cache for multi-turn
+            if !translator.reasoning_content.is_empty() {
+                let sid = session_id_for_save.as_deref().unwrap_or("unknown");
+                if let Err(e) = reason_cache
+                    .save(sid, &translator.response_id, &translator.reasoning_content)
+                    .await
+                {
+                    tracing::error!("Failed to save reasoning cache: {}", e);
+                }
+            }
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -1477,6 +1542,33 @@ async fn handle_responses_via_anthropic(
             };
 
         let responses_resp = convert_anthropic_to_responses(&anthropic_resp, &upstream_model);
+
+        // Save reasoning to cache for multi-turn (non-stream)
+        if let Some(ref sid) = session_id {
+            let reasoning_text: String = anthropic_resp
+                .content
+                .iter()
+                .filter_map(|b| {
+                    if let crate::types::anthropic::AnthropicContentBlock::Thinking {
+                        thinking,
+                        ..
+                    } = b
+                    {
+                        Some(thinking.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !reasoning_text.is_empty() {
+                let _ = state
+                    .reason_cache
+                    .save(sid, &responses_resp.id, &reasoning_text)
+                    .await;
+            }
+        }
+
         (
             StatusCode::OK,
             [("content-type", "application/json")],
@@ -1681,12 +1773,22 @@ async fn error_dump_middleware(req: Request, next: Next, _state: AppState) -> Re
 
     // Capture request body for logging
     let (parts, body) = req.into_parts();
-    let body_bytes = axum::body::to_bytes(body, 1024 * 1024)
-        .await
-        .unwrap_or_default();
+    let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(
+                "Request body too large ({}) for error dump, body discarded",
+                e
+            );
+            axum::body::Bytes::new()
+        }
+    };
     let req_body = String::from_utf8_lossy(&body_bytes).to_string();
 
-    // Reconstruct request for the next handler
+    // Note: when body exceeds the limit, body_bytes is empty and the
+    // reconstructed request below delivers an empty body to the handler.
+    // The handler's empty-body guard returns {} which Codex sees as an error.
+    // If this happens, increase the limit above or use a streaming body.
     let req = Request::from_parts(parts, Body::from(body_bytes.clone()));
 
     let response = next.run(req).await;

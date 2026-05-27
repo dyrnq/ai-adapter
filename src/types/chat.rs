@@ -6,6 +6,7 @@ use serde_json::Value;
 pub struct ChatCompletionsRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     pub max_tokens: Option<u32>,
     #[serde(rename = "max_completion_tokens")]

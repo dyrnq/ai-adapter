@@ -69,7 +69,7 @@ pub fn event_type_str(event: &ResponsesStreamEvent) -> &str {
 
 #[allow(dead_code)]
 pub struct AnthropicStreamTranslator {
-    response_id: String,
+    pub response_id: String,
     model: String,
     output_index: u32,
     content_index: u32,
@@ -91,6 +91,7 @@ pub struct AnthropicStreamTranslator {
     seq: u32,
     pub event_completed: bool,
     created: i64,
+    pub reasoning_content: String,
 }
 
 impl AnthropicStreamTranslator {
@@ -118,6 +119,7 @@ impl AnthropicStreamTranslator {
             seq: 0,
             event_completed: false,
             created: Self::now_unix(),
+            reasoning_content: String::new(),
         }
     }
 
@@ -265,6 +267,7 @@ impl AnthropicStreamTranslator {
                 }
                 crate::types::anthropic::AnthropicContentBlockDelta::ThinkingDelta { thinking } => {
                     self.current_reasoning.push_str(thinking);
+                    self.reasoning_content.push_str(thinking);
                     events.push(ResponsesStreamEvent::ReasoningTextDelta {
                         output_index: *index,
                         content_index: 0,

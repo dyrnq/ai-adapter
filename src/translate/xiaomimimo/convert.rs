@@ -12,13 +12,10 @@ use crate::translate::deepseek::anthropic as shared;
 /// - No forced `thinking: disabled` (let upstream decide)
 /// - Standard Anthropic auth (handled by server, not translator)
 pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> AnthropicRequest {
-    let system = responses.instructions.as_ref().map(|inst| {
-        AnthropicSystem::Blocks(vec![AnthropicTextBlock {
-            block_type: "text".to_string(),
-            text: inst.clone(),
-            cache_control: None,
-        }])
-    });
+    let system = responses
+        .instructions
+        .as_ref()
+        .map(|inst| AnthropicSystem::String(inst.clone()));
 
     let messages = shared::build_anthropic_messages(responses.input.as_deref().unwrap_or(&[]));
 
