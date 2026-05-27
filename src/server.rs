@@ -590,65 +590,58 @@ async fn handle_chat_completions(
             while let Some(result) = byte_stream.next().await {
                 match result {
                     Ok(bytes) => {
-                        if let Ok(s) = String::from_utf8(bytes) {
-                            buffer.push_str(&s);
+                        let s = String::from_utf8_lossy(&bytes);
+                        buffer.push_str(&s);
 
-                            while let Some(pos) = buffer.find("\n\n") {
-                                let chunk = buffer[..pos].to_string();
-                                buffer = buffer[pos + 2..].to_string();
+                        while let Some(pos) = buffer.find("\n\n") {
+                            let chunk = buffer[..pos].to_string();
+                            buffer = buffer[pos + 2..].to_string();
 
-                                for line in chunk.lines() {
-                                    let trimmed = line.trim();
-                                    if trimmed.is_empty() {
-                                        continue;
+                            for line in chunk.lines() {
+                                let trimmed = line.trim();
+                                if trimmed.is_empty() {
+                                    continue;
+                                }
+                                if trimmed == "[DONE]" {
+                                    if !done_sent {
+                                        done_sent = true;
+                                        let _ = tx
+                                            .send(Ok(axum::response::sse::Event::default()
+                                                .data("[DONE]")))
+                                            .await;
                                     }
-                                    if trimmed == "[DONE]" {
-                                        if !done_sent {
-                                            done_sent = true;
-                                            let _ = tx
-                                                .send(Ok(axum::response::sse::Event::default()
-                                                    .data("[DONE]")))
-                                                .await;
-                                        }
-                                        continue;
-                                    }
-                                    if let Some(stripped) = trimmed.strip_prefix("data:") {
-                                        let data = if trimmed.len() > 5 {
-                                            stripped.trim()
-                                        } else {
-                                            ""
-                                        };
-                                        if let Ok(event) =
-                                            serde_json::from_str::<
-                                                crate::types::responses::ResponsesStreamEvent,
-                                            >(data)
-                                        {
-                                            let chunks = translator.process_event(&event);
-                                            for chunk_json in chunks {
-                                                if chunk_json == Value::String("[DONE]".to_string())
-                                                {
-                                                    if !done_sent {
-                                                        done_sent = true;
-                                                        let _ = tx
-                                                            .send(Ok(
-                                                                axum::response::sse::Event::default()
-                                                                    .data("[DONE]"),
-                                                            ))
-                                                            .await;
-                                                    }
-                                                } else {
+                                    continue;
+                                }
+                                if let Some(stripped) = trimmed.strip_prefix("data:") {
+                                    let data = if trimmed.len() > 5 {
+                                        stripped.trim()
+                                    } else {
+                                        ""
+                                    };
+                                    if let Ok(event) = serde_json::from_str::<
+                                        crate::types::responses::ResponsesStreamEvent,
+                                    >(data)
+                                    {
+                                        let chunks = translator.process_event(&event);
+                                        for chunk_json in chunks {
+                                            if chunk_json == Value::String("[DONE]".to_string()) {
+                                                if !done_sent {
+                                                    done_sent = true;
                                                     let _ = tx
                                                         .send(Ok(
                                                             axum::response::sse::Event::default()
-                                                                .data(
-                                                                    serde_json::to_string(
-                                                                        &chunk_json,
-                                                                    )
-                                                                    .unwrap_or_default(),
-                                                                ),
+                                                                .data("[DONE]"),
                                                         ))
                                                         .await;
                                                 }
+                                            } else {
+                                                let _ = tx
+                                                    .send(Ok(axum::response::sse::Event::default()
+                                                        .data(
+                                                            serde_json::to_string(&chunk_json)
+                                                                .unwrap_or_default(),
+                                                        )))
+                                                    .await;
                                             }
                                         }
                                     }
@@ -770,20 +763,19 @@ async fn handle_chat_passthrough(
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
-                        if let Ok(s) = String::from_utf8(bytes) {
-                            buffer.push_str(&s);
-                            while let Some(pos) = buffer.find("\n\n") {
-                                let chunk = buffer[..pos].to_string();
-                                buffer = buffer[pos + 2..].to_string();
-                                for line in chunk.lines() {
-                                    let trimmed = line.trim();
-                                    if !trimmed.is_empty() {
-                                        let _ = tx
-                                            .send(Ok(
-                                                axum::response::sse::Event::default().data(trimmed)
-                                            ))
-                                            .await;
-                                    }
+                        let s = String::from_utf8_lossy(&bytes);
+                        buffer.push_str(&s);
+                        while let Some(pos) = buffer.find("\n\n") {
+                            let chunk = buffer[..pos].to_string();
+                            buffer = buffer[pos + 2..].to_string();
+                            for line in chunk.lines() {
+                                let trimmed = line.trim();
+                                if !trimmed.is_empty() {
+                                    let _ = tx
+                                        .send(Ok(
+                                            axum::response::sse::Event::default().data(trimmed)
+                                        ))
+                                        .await;
                                 }
                             }
                         }
@@ -903,20 +895,19 @@ async fn handle_chat_via_anthropic(
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
-                        if let Ok(s) = String::from_utf8(bytes.to_vec()) {
-                            buffer.push_str(&s);
-                            while let Some(pos) = buffer.find("\n\n") {
-                                let chunk = buffer[..pos].to_string();
-                                buffer = buffer[pos + 2..].to_string();
-                                for line in chunk.lines() {
-                                    let trimmed = line.trim();
-                                    if !trimmed.is_empty() {
-                                        let _ = tx
-                                            .send(Ok(
-                                                axum::response::sse::Event::default().data(trimmed)
-                                            ))
-                                            .await;
-                                    }
+                        let s = String::from_utf8_lossy(&bytes);
+                        buffer.push_str(&s);
+                        while let Some(pos) = buffer.find("\n\n") {
+                            let chunk = buffer[..pos].to_string();
+                            buffer = buffer[pos + 2..].to_string();
+                            for line in chunk.lines() {
+                                let trimmed = line.trim();
+                                if !trimmed.is_empty() {
+                                    let _ = tx
+                                        .send(Ok(
+                                            axum::response::sse::Event::default().data(trimmed)
+                                        ))
+                                        .await;
                                 }
                             }
                         }
@@ -1098,7 +1089,8 @@ async fn handle_responses_via_chat(
                 let len = r.len();
                 let truncated = if state.config.truncate_reasoning && len > 32768 {
                     tracing::warn!("Truncated reasoning from {} to 32KB", len);
-                    r[..32768].to_string()
+                    let boundary = r.floor_char_boundary(32768);
+                    r[..boundary].to_string()
                 } else {
                     r
                 };
@@ -1212,41 +1204,39 @@ async fn handle_responses_via_chat(
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
-                        if let Ok(s) = String::from_utf8(bytes.to_vec()) {
-                            buffer.push_str(&s);
+                        let s = String::from_utf8_lossy(&bytes);
+                        buffer.push_str(&s);
 
-                            while let Some(pos) = buffer.find("\n\n") {
-                                let chunk = buffer[..pos].to_string();
-                                buffer = buffer[pos + 2..].to_string();
+                        while let Some(pos) = buffer.find("\n\n") {
+                            let chunk = buffer[..pos].to_string();
+                            buffer = buffer[pos + 2..].to_string();
 
-                                for line in chunk.lines() {
-                                    let trimmed = line.trim();
-                                    if trimmed.is_empty() {
-                                        continue;
-                                    }
-                                    if trimmed == "[DONE]" {
-                                        // Force finalize: emit remaining events if not finished
-                                        if !translator.is_finished() {
-                                            translator.set_finished();
-                                            let final_events = translator.finalize();
-                                            for event in final_events {
-                                                send_sse(&tx, &event).await;
-                                            }
+                            for line in chunk.lines() {
+                                let trimmed = line.trim();
+                                if trimmed.is_empty() {
+                                    continue;
+                                }
+                                if trimmed == "[DONE]" {
+                                    // Force finalize: emit remaining events if not finished
+                                    if !translator.is_finished() {
+                                        translator.set_finished();
+                                        let final_events = translator.finalize();
+                                        for event in final_events {
+                                            send_sse(&tx, &event).await;
                                         }
-                                        continue;
                                     }
-                                    if let Some(stripped) = trimmed.strip_prefix("data:") {
-                                        let data = if trimmed.len() > 5 {
-                                            stripped.trim()
-                                        } else {
-                                            ""
-                                        };
-                                        if let Ok(chunk_json) = serde_json::from_str::<Value>(data)
-                                        {
-                                            let events = translator.process_chunk(&chunk_json);
-                                            for event in events {
-                                                send_sse(&tx, &event).await;
-                                            }
+                                    continue;
+                                }
+                                if let Some(stripped) = trimmed.strip_prefix("data:") {
+                                    let data = if trimmed.len() > 5 {
+                                        stripped.trim()
+                                    } else {
+                                        ""
+                                    };
+                                    if let Ok(chunk_json) = serde_json::from_str::<Value>(data) {
+                                        let events = translator.process_chunk(&chunk_json);
+                                        for event in events {
+                                            send_sse(&tx, &event).await;
                                         }
                                     }
                                 }
@@ -1479,33 +1469,31 @@ async fn handle_responses_via_anthropic(
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
-                        if let Ok(s) = String::from_utf8(bytes.to_vec()) {
-                            buffer.push_str(&s);
+                        let s = String::from_utf8_lossy(&bytes);
+                        buffer.push_str(&s);
 
-                            while let Some(pos) = buffer.find("\n\n") {
-                                let chunk = buffer[..pos].to_string();
-                                buffer = buffer[pos + 2..].to_string();
+                        while let Some(pos) = buffer.find("\n\n") {
+                            let chunk = buffer[..pos].to_string();
+                            buffer = buffer[pos + 2..].to_string();
 
-                                for line in chunk.lines() {
-                                    let trimmed = line.trim();
-                                    if trimmed.is_empty() {
-                                        continue;
-                                    }
-                                    if let Some(stripped) = trimmed.strip_prefix("data:") {
-                                        let data = if trimmed.len() > 5 {
-                                            stripped.trim()
-                                        } else {
-                                            ""
-                                        };
-                                        if let Ok(event) =
-                                            serde_json::from_str::<
-                                                crate::types::anthropic::AnthropicStreamEvent,
-                                            >(data)
-                                        {
-                                            let events = translator.process_event(&event);
-                                            for e in events {
-                                                send_sse(&tx, &e).await;
-                                            }
+                            for line in chunk.lines() {
+                                let trimmed = line.trim();
+                                if trimmed.is_empty() {
+                                    continue;
+                                }
+                                if let Some(stripped) = trimmed.strip_prefix("data:") {
+                                    let data = if trimmed.len() > 5 {
+                                        stripped.trim()
+                                    } else {
+                                        ""
+                                    };
+                                    if let Ok(event) = serde_json::from_str::<
+                                        crate::types::anthropic::AnthropicStreamEvent,
+                                    >(data)
+                                    {
+                                        let events = translator.process_event(&event);
+                                        for e in events {
+                                            send_sse(&tx, &e).await;
                                         }
                                     }
                                 }
