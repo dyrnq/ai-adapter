@@ -108,7 +108,7 @@ pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> Anthropic
     }
 }
 
-fn map_tool_choice(tc: &Option<Value>) -> Option<AnthropicToolChoice> {
+pub(crate) fn map_tool_choice(tc: &Option<Value>) -> Option<AnthropicToolChoice> {
     match tc {
         Some(Value::String(s)) if s == "auto" => Some(AnthropicToolChoice::Auto),
         Some(Value::String(s)) if s == "required" || s == "any" => Some(AnthropicToolChoice::Any),
@@ -281,7 +281,7 @@ enum PendingGroup {
 
 /// Build a `Vec<AnthropicMessage>` from `ResponsesInputItem` items, merging
 /// consecutive `FunctionCall` / `FunctionCallOutput` items as specified.
-fn build_anthropic_messages(items: &[ResponsesInputItem]) -> Vec<AnthropicMessage> {
+pub(crate) fn build_anthropic_messages(items: &[ResponsesInputItem]) -> Vec<AnthropicMessage> {
     let mut messages: Vec<AnthropicMessage> = Vec::new();
     let mut pending: Option<PendingGroup> = None;
 
@@ -435,7 +435,9 @@ fn convert_image_url(url: &str) -> Option<AnthropicContentBlock> {
 /// 3. Ensures every assistant message containing `tool_use` blocks is followed by
 ///    a user message containing matching `tool_result` blocks (inserting a
 ///    placeholder if necessary).
-fn sanitize_anthropic_messages(messages: Vec<AnthropicMessage>) -> Vec<AnthropicMessage> {
+pub(crate) fn sanitize_anthropic_messages(
+    messages: Vec<AnthropicMessage>,
+) -> Vec<AnthropicMessage> {
     if messages.is_empty() {
         return messages;
     }

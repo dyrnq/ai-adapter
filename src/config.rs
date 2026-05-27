@@ -19,6 +19,7 @@ pub enum UpstreamVendor {
     DeepSeek,
     OpenAI,
     Anthropic,
+    XiaomiMimo,
     #[default]
     Auto,
 }
@@ -28,7 +29,9 @@ impl UpstreamVendor {
     pub fn resolve(&self, base_url: &str) -> UpstreamVendor {
         match self {
             UpstreamVendor::Auto => {
-                if base_url.contains("deepseek") {
+                if base_url.contains("xiaomimimo") {
+                    UpstreamVendor::XiaomiMimo
+                } else if base_url.contains("deepseek") {
                     UpstreamVendor::DeepSeek
                 } else if base_url.contains("anthropic") {
                     UpstreamVendor::Anthropic
@@ -229,6 +232,7 @@ pub fn load_config(
                 "deepseek" => UpstreamVendor::DeepSeek,
                 "openai" => UpstreamVendor::OpenAI,
                 "anthropic" => UpstreamVendor::Anthropic,
+                "xiaomimimo" => UpstreamVendor::XiaomiMimo,
                 "auto" => UpstreamVendor::Auto,
                 _ => UpstreamVendor::Auto,
             };

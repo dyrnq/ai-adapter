@@ -12,13 +12,17 @@ pub struct ChatCompletionsRequest {
     pub max_completion_tokens: Option<u32>,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_penalty: Option<f64>,
     pub tools: Option<Vec<ChatTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<Value>,
     #[serde(rename = "parallel_tool_calls")]
     pub parallel_tool_calls: Option<bool>,
     pub stop: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
     pub seed: Option<u32>,
     #[serde(rename = "stream_options")]
@@ -26,6 +30,7 @@ pub struct ChatCompletionsRequest {
     pub user: Option<String>,
     #[serde(rename = "response_format")]
     pub response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<bool>,
     pub top_logprobs: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -26,6 +26,7 @@ use crate::stream::sse::{
 use crate::translate::{
     chat_resp_to_responses, convert_anthropic_to_responses, convert_chat_to_responses,
     convert_chat_to_responses_response, convert_for_deepseek, convert_responses_to_anthropic,
+    convert_responses_to_anthropic_for,
 };
 use crate::types::chat::ChatCompletionsRequest;
 use crate::types::responses::{
@@ -355,8 +356,17 @@ async fn compact_via_anthropic(
         HeaderValue::from_static("2023-06-01"),
     );
     if let Some(ref key) = api_key {
-        if let Ok(val) = HeaderValue::from_str(key) {
-            upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+        match state.config.vendor {
+            crate::config::UpstreamVendor::XiaomiMimo => {
+                if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
+                    upstream_headers.insert(HeaderName::from_static("authorization"), val);
+                }
+            }
+            _ => {
+                if let Ok(val) = HeaderValue::from_str(key) {
+                    upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+                }
+            }
         }
     }
 
@@ -804,8 +814,17 @@ async fn handle_chat_via_anthropic(
         HeaderValue::from_static("2023-06-01"),
     );
     if let Some(ref key) = api_key {
-        if let Ok(val) = HeaderValue::from_str(key) {
-            upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+        match state.config.vendor {
+            crate::config::UpstreamVendor::XiaomiMimo => {
+                if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
+                    upstream_headers.insert(HeaderName::from_static("authorization"), val);
+                }
+            }
+            _ => {
+                if let Ok(val) = HeaderValue::from_str(key) {
+                    upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+                }
+            }
         }
     }
 
@@ -1066,7 +1085,12 @@ async fn handle_responses_via_chat(
         None
     };
 
-    let chat_req = convert_for_deepseek(req, previous_reasoning);
+    let chat_req = match &state.config.vendor {
+        crate::config::UpstreamVendor::XiaomiMimo => {
+            crate::translate::xiaomimimo::chat::convert_responses_to_chat(req)
+        }
+        _ => convert_for_deepseek(req, previous_reasoning),
+    };
 
     let upstream_url = build_upstream_url(&state.config.base_url, "/v1/chat/completions");
 
@@ -1285,7 +1309,7 @@ async fn handle_responses_via_anthropic(
     api_key: Option<String>,
     _session_id: Option<String>,
 ) -> Response {
-    let anthropic_req = convert_responses_to_anthropic(req);
+    let anthropic_req = convert_responses_to_anthropic_for(req, &state.config.vendor);
 
     let upstream_url = build_upstream_url(&state.config.base_url, "/v1/messages");
 
@@ -1299,8 +1323,17 @@ async fn handle_responses_via_anthropic(
         HeaderValue::from_static("2023-06-01"),
     );
     if let Some(ref key) = api_key {
-        if let Ok(val) = HeaderValue::from_str(key) {
-            upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+        match state.config.vendor {
+            crate::config::UpstreamVendor::XiaomiMimo => {
+                if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
+                    upstream_headers.insert(HeaderName::from_static("authorization"), val);
+                }
+            }
+            _ => {
+                if let Ok(val) = HeaderValue::from_str(key) {
+                    upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+                }
+            }
         }
     }
 
