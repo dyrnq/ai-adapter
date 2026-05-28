@@ -168,7 +168,7 @@ impl RuntimeConfig {
         println!("api_key:          {}", masked_key);
         println!("drop_images:      {}", self.drop_images);
         println!("backfill_reason:  {}", self.backfill_reasoning);
-        println!("truncate_reason:   {}", self.truncate_reasoning);
+        println!("truncate_reasoning:   {}", self.truncate_reasoning);
         println!("cors:             {}", self.cors);
         println!("log_http:         {}", self.log_http);
         if let Some(ref d) = self.access_log_dir {

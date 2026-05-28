@@ -1781,7 +1781,7 @@ fn extract_bearer(headers: &HeaderMap) -> Option<String> {
 // Error dump middleware — saves failed exchanges to logs/
 // ============================================================
 
-async fn error_dump_middleware(req: Request, next: Next, _state: AppState) -> Response {
+async fn error_dump_middleware(req: Request, next: Next, state: AppState) -> Response {
     let start = Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -1789,7 +1789,7 @@ async fn error_dump_middleware(req: Request, next: Next, _state: AppState) -> Re
 
     // Capture request body for logging
     let (parts, body) = req.into_parts();
-    let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
+    let body_bytes = match axum::body::to_bytes(body, 50 * 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => {
             tracing::warn!(
@@ -1845,7 +1845,7 @@ async fn error_dump_middleware(req: Request, next: Next, _state: AppState) -> Re
         });
 
         if let Ok(dump_str) = serde_json::to_string_pretty(&dump) {
-            save_error_dump(status.as_u16(), &dump_str);
+            save_error_dump(status.as_u16(), &dump_str, state.config.access_log_dir.as_deref());
         }
 
         return Response::from_parts(resp_parts, Body::from(resp_body_bytes));
@@ -1896,12 +1896,15 @@ fn truncate_for_log(s: &str, max_len: usize) -> String {
     }
 }
 
-fn save_error_dump(status: u16, dump_json: &str) {
-    let dir = std::env::var("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".ai-adapter")
-        .join("logs");
+fn save_error_dump(status: u16, dump_json: &str, log_dir: Option<&str>) {
+    let dir = match log_dir {
+        Some(d) => std::path::PathBuf::from(d),
+        None => std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(".ai-adapter")
+            .join("logs"),
+    };
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::error!("Failed to create logs directory: {}", e);
         return;
