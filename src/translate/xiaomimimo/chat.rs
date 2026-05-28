@@ -13,10 +13,10 @@ pub fn convert_responses_to_chat(
 
     // instructions → system message
     if let Some(ref instructions) = responses.instructions {
-        if !instructions.is_empty() {
+        if !instructions.0.is_empty() {
             messages.push(ChatMessage {
                 role: "system".to_string(),
-                content: Some(ChatContent::String(instructions.clone())),
+                content: Some(ChatContent::String(instructions.0.clone())),
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,

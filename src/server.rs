@@ -218,7 +218,7 @@ fn build_compact_prompt(req: &CompactRequest) -> String {
         }
     }
 
-    let instructions = req.instructions.as_deref().unwrap_or(
+    let instructions = req.instructions.as_ref().map(|i| i.0.as_str()).unwrap_or(
         "Summarize the conversation above, preserving key decisions, code changes, and context.",
     );
 

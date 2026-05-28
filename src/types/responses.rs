@@ -1,12 +1,75 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+
+/// Instructions may be a string or an array of strings (Codex CLI sends both forms).
+/// When serializing we always produce a string (DeepSeek requirement).
+#[derive(Debug, Clone, Serialize)]
+pub struct Instructions(pub String);
+
+impl<'de> Deserialize<'de> for Instructions {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let val = Value::deserialize(deserializer)?;
+        match val {
+            Value::String(s) => Ok(Instructions(s)),
+            Value::Array(arr) => {
+                let text: String = arr
+                    .iter()
+                    .filter_map(|v| {
+                        v.as_str().map(|s| s.to_string()).or_else(|| {
+                            v.get("text")
+                                .and_then(|t| t.as_str())
+                                .map(|s| s.to_string())
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                Ok(Instructions(text))
+            }
+            other => Err(serde::de::Error::custom(format!(
+                "instructions: expected string or array of strings, got: {}",
+                other
+            ))),
+        }
+    }
+}
+
+/// Deserialize FunctionCallOutput::output which may be:
+/// - String (normal)
+/// - Array of strings or {text: "..."} objects (Codex long-session bug)
+pub fn deser_output_or_content<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let val = Value::deserialize(d)?;
+    match val {
+        Value::String(s) => Ok(s),
+        Value::Array(arr) => {
+            let text: String = arr
+                .iter()
+                .filter_map(|v| {
+                    v.as_str().map(|s| s.to_string()).or_else(|| {
+                        v.get("text")
+                            .and_then(|t| t.as_str())
+                            .map(|s| s.to_string())
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Ok(text)
+        }
+        other => Ok(serde_json::to_string(&other).unwrap_or_default()),
+    }
+}
 
 /// OpenAI Responses API request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponsesRequest {
     pub model: String,
     pub input: Option<Vec<ResponsesInputItem>>,
-    pub instructions: Option<String>,
+    pub instructions: Option<Instructions>,
     pub stream: Option<bool>,
     pub max_output_tokens: Option<u32>,
     pub temperature: Option<f64>,
@@ -121,6 +184,7 @@ pub enum ResponsesInputItem {
     #[serde(rename = "function_call_output")]
     FunctionCallOutput {
         call_id: String,
+        #[serde(deserialize_with = "deser_output_or_content")]
         output: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
@@ -357,7 +421,7 @@ pub fn content_parts_to_text(parts: &[ResponsesContentPart]) -> String {
 pub struct CompactRequest {
     pub input: Vec<ResponsesInputItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<String>,
+    pub instructions: Option<Instructions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 }

@@ -15,7 +15,7 @@ pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> Anthropic
     let system = responses
         .instructions
         .as_ref()
-        .map(|inst| AnthropicSystem::String(inst.clone()));
+        .map(|inst| AnthropicSystem::String(inst.0.clone()));
 
     let messages = shared::build_anthropic_messages(responses.input.as_deref().unwrap_or(&[]));
 

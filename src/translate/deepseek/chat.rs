@@ -28,10 +28,10 @@ pub fn convert_responses_to_chat(
 
     // -- instructions → system message ------------------------------------------------
     if let Some(ref instructions) = responses.instructions {
-        if !instructions.is_empty() {
+        if !instructions.0.is_empty() {
             messages.push(ChatMessage {
                 role: "system".to_string(),
-                content: Some(ChatContent::String(instructions.clone())),
+                content: Some(ChatContent::String(instructions.0.clone())),
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -431,7 +431,7 @@ pub fn convert_chat_to_responses(chat: &ChatCompletionsRequest) -> ResponsesRequ
     ResponsesRequest {
         model: chat.model.clone(),
         input: Some(input),
-        instructions,
+        instructions: instructions.map(Instructions),
         stream: chat.stream,
         max_output_tokens: chat.max_completion_tokens.or(chat.max_tokens),
         temperature: chat.temperature,

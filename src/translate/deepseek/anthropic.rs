@@ -25,7 +25,7 @@ pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> Anthropic
     let system = responses.instructions.as_ref().map(|inst| {
         AnthropicSystem::Blocks(vec![AnthropicTextBlock {
             block_type: "text".to_string(),
-            text: inst.clone(),
+            text: inst.0.clone(),
             cache_control: None,
         }])
     });
@@ -638,7 +638,7 @@ mod tests {
     fn instructions_become_system() {
         let req = ResponsesRequest {
             model: "deepseek".into(),
-            instructions: Some("Be helpful.".into()),
+            instructions: Some(Instructions("Be helpful.".into())),
             input: Some(vec![]),
             ..default_responses_request()
         };
