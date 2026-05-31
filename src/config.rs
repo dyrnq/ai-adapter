@@ -302,6 +302,8 @@ pub fn load_config(
     } else if config.access_log_dir.is_none() {
         if let Ok(d) = std::env::var("LOG_DIR") {
             config.access_log_dir = Some(d);
+        } else if let Ok(data_dir) = std::env::var("DATA_DIR") {
+            config.access_log_dir = Some(format!("{}/logs", data_dir));
         }
     }
     if let Some(v) = cli_vendor {

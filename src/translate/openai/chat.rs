@@ -133,12 +133,18 @@ pub fn convert_responses_to_chat(responses: &ResponsesRequest) -> ChatCompletion
         stream: responses.stream,
         max_tokens: None,
         max_completion_tokens: responses.max_output_tokens,
-        temperature: Some(responses.temperature.unwrap_or(1.0)),
+        temperature: Some(responses.temperature.unwrap_or(0.0)),
         top_p: responses.top_p,
         frequency_penalty: responses.frequency_penalty,
         presence_penalty: responses.presence_penalty,
-        tools,
-        tool_choice: responses.tool_choice.clone(),
+        tools: tools.clone(),
+        tool_choice: if tools.as_ref().is_some_and(|t| !t.is_empty())
+            && responses.tool_choice.as_ref().is_none_or(|v| v == "auto")
+        {
+            Some(serde_json::json!("required"))
+        } else {
+            responses.tool_choice.clone()
+        },
         parallel_tool_calls: responses.parallel_tool_calls,
         stop: None,
         n: None,
@@ -623,4 +629,89 @@ fn map_status_to_finish_reason(status: &str) -> String {
         _ => "stop",
     }
     .to_string()
+}
+
+pub(crate) fn extract_xml_tool_calls(content: &str) -> (String, Vec<ToolCall>) {
+    let mut cleaned = content.to_string();
+    let mut tool_calls = Vec::new();
+    let mut idx = 0u32;
+
+    // Try <function-call>...</function-call> first, then <tools>...</tools>
+    for (tag, tag_len) in [("<function-call>", 15), ("<tools>", 7)] {
+        let close_tag = if tag_len == 15 {
+            "</function-call>"
+        } else {
+            "</tools>"
+        };
+        let close_len = close_tag.len();
+        loop {
+            let rest = cleaned.clone();
+            let Some(start) = rest.find(tag) else {
+                break;
+            };
+            let Some(end) = rest[start..].find(close_tag) else {
+                break;
+            };
+            let inner = rest[start + tag_len..start + end].trim();
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(inner) {
+                // Skip <tools> blocks that echo the schema (contain "type":)
+                if tag_len == 7 && parsed.get("type").is_some() {
+                    cleaned.replace_range(start..start + end + close_len, "");
+                    continue;
+                }
+                let call_id = format!("call_{}", uuid::Uuid::new_v4());
+                let name = parsed
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let arguments = parsed
+                    .get("arguments")
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "{}".to_string());
+                tool_calls.push(ToolCall {
+                    id: call_id.clone(),
+                    tool_type: "function".to_string(),
+                    function: FunctionCall { name, arguments },
+                    index: Some(idx),
+                });
+                idx += 1;
+            }
+            cleaned.replace_range(start..start + end + close_len, "");
+        }
+    }
+
+    cleaned = cleaned.trim().to_string();
+    (cleaned, tool_calls)
+}
+
+#[cfg(test)]
+mod tests_xml {
+    use super::*;
+
+    #[test]
+    fn test_extract_xml_tool_calls_single() {
+        let input = concat!(
+            "<tools>\n",
+            r#"{"type": "function", "function": {"name": "get_weather"}}"#,
+            "\n</tools>\n\n",
+            "<function-call>\n",
+            r#"{"name": "get_weather", "arguments": {"city": "Beijing"}}"#,
+            "\n</function-call>"
+        );
+        let (cleaned, tcs) = extract_xml_tool_calls(input);
+        assert_eq!(cleaned, "");
+        assert_eq!(tcs.len(), 1);
+        assert_eq!(tcs[0].function.name, "get_weather");
+        let args: serde_json::Value = serde_json::from_str(&tcs[0].function.arguments).unwrap();
+        assert_eq!(args["city"], "Beijing");
+    }
+
+    #[test]
+    fn test_no_xml() {
+        let input = "Hello, how can I help?";
+        let (cleaned, tcs) = extract_xml_tool_calls(input);
+        assert_eq!(cleaned, "Hello, how can I help?");
+        assert!(tcs.is_empty());
+    }
 }

@@ -853,11 +853,33 @@ impl ChatStreamToResponsesTranslator {
                 sequence_number: self.next_seq(),
             });
 
+            // Extract XML tool calls from full_text (Qwen2.5-Coder format)
+            let (clean_text, xml_tool_calls) =
+                crate::translate::openai::chat::extract_xml_tool_calls(&full_text);
+
+            // output_text.done (with clean text)
+            events.push(ResponsesStreamEvent::OutputTextDone {
+                output_index: self.output_index,
+                content_index: 0,
+                text: clean_text.clone(),
+                sequence_number: self.next_seq(),
+            });
+
+            // content_part.done
+            events.push(ResponsesStreamEvent::ContentPartDone {
+                output_index: self.output_index,
+                content_index: 0,
+                part: ResponsesContentPart::OutputText {
+                    text: clean_text.clone(),
+                },
+                sequence_number: self.next_seq(),
+            });
+
             // output_item.done for message
             let msg_item = ResponsesOutputItem::Message {
                 id: self.item_id.clone(),
                 role: Some("assistant".to_string()),
-                content: vec![ResponsesContentPart::OutputText { text: full_text }],
+                content: vec![ResponsesContentPart::OutputText { text: clean_text }],
                 status: Some("completed".to_string()),
             };
             events.push(ResponsesStreamEvent::OutputItemDone {
@@ -866,8 +888,36 @@ impl ChatStreamToResponsesTranslator {
                 sequence_number: self.next_seq(),
             });
 
-            // Output item done for each tool call
+            // Output item done for each XML tool call (Qwen format)
+            for tc in &xml_tool_calls {
+                let xml_index = self.tool_calls.len() as u32 + 1;
+                events.push(ResponsesStreamEvent::OutputItemAdded {
+                    output_index: xml_index,
+                    item: ResponsesOutputItem::FunctionCall {
+                        id: tc.id.clone(),
+                        call_id: tc.id.clone(),
+                        name: tc.function.name.clone(),
+                        arguments: tc.function.arguments.clone(),
+                        status: Some("completed".to_string()),
+                    },
+                    sequence_number: self.next_seq(),
+                });
+                events.push(ResponsesStreamEvent::OutputItemDone {
+                    output_index: xml_index,
+                    item: ResponsesOutputItem::FunctionCall {
+                        id: tc.id.clone(),
+                        call_id: tc.id.clone(),
+                        name: tc.function.name.clone(),
+                        arguments: tc.function.arguments.clone(),
+                        status: Some("completed".to_string()),
+                    },
+                    sequence_number: self.next_seq(),
+                });
+            }
+
+            // Output item done for each tool call (from standard delta)
             let tool_call_count = self.tool_calls.len();
+
             let mut seqs: Vec<u32> = Vec::with_capacity(tool_call_count * 2);
             for _ in 0..tool_call_count {
                 seqs.push(self.next_seq());
@@ -918,10 +968,50 @@ impl ChatStreamToResponsesTranslator {
         } else {
             None
         };
+
+        // Build output from accumulated state
+        let mut output: Vec<ResponsesOutputItem> = Vec::new();
+
+        // Extract XML tool calls from accumulated text (Qwen format)
+        let (clean_text, xml_tool_calls) =
+            crate::translate::openai::chat::extract_xml_tool_calls(&self.current_text);
+
+        // Message item
+        if !clean_text.is_empty() {
+            output.push(ResponsesOutputItem::Message {
+                id: self.item_id.clone(),
+                role: Some("assistant".to_string()),
+                content: vec![ResponsesContentPart::OutputText { text: clean_text }],
+                status: Some("completed".to_string()),
+            });
+        }
+
+        // XML tool calls
+        for tc in &xml_tool_calls {
+            output.push(ResponsesOutputItem::FunctionCall {
+                id: tc.id.clone(),
+                call_id: tc.id.clone(),
+                name: tc.function.name.clone(),
+                arguments: tc.function.arguments.clone(),
+                status: Some("completed".to_string()),
+            });
+        }
+
+        // Standard tool calls (from delta)
+        for pending in self.tool_calls.values() {
+            output.push(ResponsesOutputItem::FunctionCall {
+                id: pending.id.clone(),
+                call_id: pending.id.clone(),
+                name: pending.name.clone(),
+                arguments: pending.arguments.clone(),
+                status: Some("completed".to_string()),
+            });
+        }
+
         ResponsesResponse {
             id: self.response_id.clone(),
             object: "response".to_string(),
-            output: vec![],
+            output,
             status: Some(status.to_string()),
             usage: self.usage.clone(),
             model: Some(self.model.clone()),
