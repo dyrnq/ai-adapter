@@ -587,7 +587,7 @@ async fn handle_chat_completions(
             let mut buffer = String::new();
             futures::pin_mut!(byte_stream);
 
-            while let Some(result) = byte_stream.next().await {
+            'outer: while let Some(result) = byte_stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -605,10 +605,14 @@ async fn handle_chat_completions(
                                 if trimmed == "[DONE]" {
                                     if !done_sent {
                                         done_sent = true;
-                                        let _ = tx
+                                        if tx
                                             .send(Ok(axum::response::sse::Event::default()
                                                 .data("[DONE]")))
-                                            .await;
+                                            .await
+                                            .is_err()
+                                        {
+                                            break 'outer;
+                                        }
                                     }
                                     continue;
                                 }
@@ -627,21 +631,29 @@ async fn handle_chat_completions(
                                             if chunk_json == Value::String("[DONE]".to_string()) {
                                                 if !done_sent {
                                                     done_sent = true;
-                                                    let _ = tx
+                                                    if tx
                                                         .send(Ok(
                                                             axum::response::sse::Event::default()
                                                                 .data("[DONE]"),
                                                         ))
-                                                        .await;
+                                                        .await
+                                                        .is_err()
+                                                    {
+                                                        break 'outer;
+                                                    }
                                                 }
                                             } else {
-                                                let _ = tx
+                                                if tx
                                                     .send(Ok(axum::response::sse::Event::default()
                                                         .data(
                                                             serde_json::to_string(&chunk_json)
                                                                 .unwrap_or_default(),
                                                         )))
-                                                    .await;
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    break 'outer;
+                                                }
                                             }
                                         }
                                     }
@@ -760,7 +772,7 @@ async fn handle_chat_passthrough(
         tokio::spawn(async move {
             let mut buffer = String::new();
             futures::pin_mut!(stream);
-            while let Some(result) = stream.next().await {
+            'sse: while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -770,12 +782,15 @@ async fn handle_chat_passthrough(
                             buffer = buffer[pos + 2..].to_string();
                             for line in chunk.lines() {
                                 let trimmed = line.trim();
-                                if !trimmed.is_empty() {
-                                    let _ = tx
+                                if !trimmed.is_empty()
+                                    && tx
                                         .send(Ok(
                                             axum::response::sse::Event::default().data(trimmed)
                                         ))
-                                        .await;
+                                        .await
+                                        .is_err()
+                                {
+                                    break 'sse;
                                 }
                             }
                         }
@@ -892,7 +907,7 @@ async fn handle_chat_via_anthropic(
         tokio::spawn(async move {
             let mut buffer = String::new();
             futures::pin_mut!(stream);
-            while let Some(result) = stream.next().await {
+            'sse: while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -902,12 +917,15 @@ async fn handle_chat_via_anthropic(
                             buffer = buffer[pos + 2..].to_string();
                             for line in chunk.lines() {
                                 let trimmed = line.trim();
-                                if !trimmed.is_empty() {
-                                    let _ = tx
+                                if !trimmed.is_empty()
+                                    && tx
                                         .send(Ok(
                                             axum::response::sse::Event::default().data(trimmed)
                                         ))
-                                        .await;
+                                        .await
+                                        .is_err()
+                                {
+                                    break 'sse;
                                 }
                             }
                         }
@@ -1201,7 +1219,7 @@ async fn handle_responses_via_chat(
             let mut buffer = String::new();
 
             futures::pin_mut!(stream);
-            while let Some(result) = stream.next().await {
+            'sse: while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -1222,7 +1240,9 @@ async fn handle_responses_via_chat(
                                         translator.set_finished();
                                         let final_events = translator.finalize();
                                         for event in final_events {
-                                            send_sse(&tx, &event).await;
+                                            if !send_sse(&tx, &event).await {
+                                                break 'sse;
+                                            }
                                         }
                                     }
                                     continue;
@@ -1236,7 +1256,9 @@ async fn handle_responses_via_chat(
                                     if let Ok(chunk_json) = serde_json::from_str::<Value>(data) {
                                         let events = translator.process_chunk(&chunk_json);
                                         for event in events {
-                                            send_sse(&tx, &event).await;
+                                            if !send_sse(&tx, &event).await {
+                                                break 'sse;
+                                            }
                                         }
                                     }
                                 }
@@ -1466,7 +1488,7 @@ async fn handle_responses_via_anthropic(
             let mut buffer = String::new();
 
             futures::pin_mut!(stream);
-            while let Some(result) = stream.next().await {
+            'sse: while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -1493,7 +1515,9 @@ async fn handle_responses_via_anthropic(
                                     {
                                         let events = translator.process_event(&event);
                                         for e in events {
-                                            send_sse(&tx, &e).await;
+                                            if !send_sse(&tx, &e).await {
+                                                break 'sse;
+                                            }
                                         }
                                     }
                                 }
@@ -1720,14 +1744,14 @@ async fn send_sse(
         std::result::Result<axum::response::sse::Event, std::convert::Infallible>,
     >,
     event: &ResponsesStreamEvent,
-) {
+) -> bool {
     let json = serde_json::to_string(event).unwrap_or_default();
     let event_type = crate::stream::sse::event_type_str(event);
-    let _ = tx
-        .send(Ok(axum::response::sse::Event::default()
-            .event(event_type)
-            .data(json)))
-        .await;
+    tx.send(Ok(axum::response::sse::Event::default()
+        .event(event_type)
+        .data(json)))
+        .await
+        .is_ok()
 }
 
 /// Build upstream URL smartly: if base_url already contains the target path, use as-is.
@@ -1845,7 +1869,11 @@ async fn error_dump_middleware(req: Request, next: Next, state: AppState) -> Res
         });
 
         if let Ok(dump_str) = serde_json::to_string_pretty(&dump) {
-            save_error_dump(status.as_u16(), &dump_str, state.config.access_log_dir.as_deref());
+            save_error_dump(
+                status.as_u16(),
+                &dump_str,
+                state.config.access_log_dir.as_deref(),
+            );
         }
 
         return Response::from_parts(resp_parts, Body::from(resp_body_bytes));
@@ -1936,7 +1964,10 @@ impl AccessLog {
             .create(true)
             .append(true)
             .open(&path)
-            .unwrap_or_else(|_| std::fs::File::create(&path).unwrap());
+            .unwrap_or_else(|e| {
+                tracing::error!("Failed to open/create access log {}: {}", path.display(), e);
+                std::process::exit(1)
+            });
         Self { file, date: today }
     }
 
@@ -1952,11 +1983,20 @@ impl AccessLog {
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
         if self.date != today {
             let path = dir.join(format!("access.{}.log", today));
-            self.file = std::fs::OpenOptions::new()
+            match std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(&path)
-                .unwrap_or_else(|_| std::fs::File::create(&path).unwrap());
+            {
+                Ok(f) => self.file = f,
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to open/create access log {}: {}; access logging disabled for this period",
+                        path.display(),
+                        e
+                    );
+                }
+            }
             self.date = today;
         }
         let now = chrono::Utc::now().to_rfc3339();

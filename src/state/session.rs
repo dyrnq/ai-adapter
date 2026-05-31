@@ -19,7 +19,7 @@ impl SessionStore {
 
     /// Record a session_id (value is timestamp, overwrites on repeat).
     pub async fn record(&self, session_id: &str) -> anyhow::Result<()> {
-        let db = self.db.read().await;
+        let db = self.db.write().await;
         let write_txn = db.begin_write()?;
         {
             let mut table = write_txn.open_table(TABLE)?;

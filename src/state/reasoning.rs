@@ -26,7 +26,7 @@ impl ReasoningCache {
         reasoning: &str,
     ) -> anyhow::Result<()> {
         let key = compose_key(session_id, response_id);
-        let db = self.db.read().await;
+        let db = self.db.write().await;
         let write_txn = db.begin_write()?;
         {
             let mut table = write_txn.open_table(TABLE)?;
@@ -56,7 +56,7 @@ impl ReasoningCache {
     #[allow(dead_code)]
     pub async fn remove(&self, session_id: &str, response_id: &str) -> anyhow::Result<()> {
         let key = compose_key(session_id, response_id);
-        let db = self.db.read().await;
+        let db = self.db.write().await;
         let write_txn = db.begin_write()?;
         {
             let mut table = write_txn.open_table(TABLE)?;
