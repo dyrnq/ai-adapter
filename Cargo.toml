@@ -1,6 +1,6 @@
 [package]
 name = "ai-adapter"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "AI API adapter - bidirectional proxy translating between OpenAI Responses, Chat Completions, and Anthropic Messages APIs"
 license = "MIT"
