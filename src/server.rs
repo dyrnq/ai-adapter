@@ -1,3 +1,4 @@
+use axum::extract::DefaultBodyLimit;
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -97,6 +98,7 @@ pub fn build_router(
         .route("/health", get(handle_health))
         .route("/__/session", get(handle_session_list))
         .route("/v1/*path", any(handle_passthrough_any))
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .layer(error_dump_layer)
         .layer(trace_layer)
         .layer(cors)
@@ -1010,6 +1012,36 @@ async fn handle_responses(
             .or_else(|| extract_bearer(&headers))
     };
 
+    // Filter images if --drop-images is set (text-only upstreams)
+    let responses_req = if state.config.drop_images {
+        let mut filtered = responses_req.clone();
+        if let Some(ref mut items) = filtered.input {
+            for item in items.iter_mut() {
+                if let crate::types::responses::ResponsesInputItem::Message {
+                    content: Some(ref mut parts),
+                    ..
+                } = item
+                {
+                    parts.retain(|p| {
+                        !matches!(
+                            p,
+                            crate::types::responses::ResponsesContentPart::InputImage { .. }
+                                | crate::types::responses::ResponsesContentPart::ImageUrl { .. }
+                        )
+                    });
+                    if parts.is_empty() {
+                        parts.push(crate::types::responses::ResponsesContentPart::InputText {
+                            text: "[image omitted]".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        filtered
+    } else {
+        responses_req
+    };
+
     // Route based on upstream format
     match state.config.upstream_format {
         UpstreamFormat::Anthropic => {
@@ -1129,11 +1161,42 @@ async fn handle_responses_via_chat(
         None
     };
 
+    // Drop images from input if configured (for text-only upstreams)
+    let req = if state.config.drop_images {
+        let mut filtered = req.clone();
+        if let Some(ref mut items) = filtered.input {
+            for item in items.iter_mut() {
+                if let crate::types::responses::ResponsesInputItem::Message {
+                    content: Some(ref mut parts),
+                    ..
+                } = item
+                {
+                    parts.retain(|p| {
+                        !matches!(
+                            p,
+                            crate::types::responses::ResponsesContentPart::InputImage { .. }
+                                | crate::types::responses::ResponsesContentPart::ImageUrl { .. }
+                        )
+                    });
+                    // If all parts were images, insert placeholder text
+                    if parts.is_empty() {
+                        parts.push(crate::types::responses::ResponsesContentPart::InputText {
+                            text: "[image omitted]".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        filtered
+    } else {
+        req.clone()
+    };
+
     let chat_req = match &state.config.vendor {
         crate::config::UpstreamVendor::XiaomiMimo => {
-            crate::translate::xiaomimimo::chat::convert_responses_to_chat(req, previous_reasoning)
+            crate::translate::xiaomimimo::chat::convert_responses_to_chat(&req, previous_reasoning)
         }
-        _ => convert_for_deepseek(req, previous_reasoning),
+        _ => convert_for_deepseek(&req, previous_reasoning),
     };
 
     let upstream_url = build_upstream_url(&state.config.base_url, "/v1/chat/completions");
@@ -1843,6 +1906,27 @@ async fn error_dump_middleware(req: Request, next: Next, state: AppState) -> Res
         status.as_u16(),
         elapsed.as_secs_f64() * 1000.0
     );
+
+    // Debug: dump /v1/responses request body when IMAGE_DEBUG=1
+    if std::env::var("IMAGE_DEBUG").is_ok_and(|v| v == "1")
+        && method == Method::POST
+        && uri.path() == "/v1/responses"
+        && (req_body.contains("image_url") || req_body.contains("input_image"))
+    {
+        let path = state
+            .config
+            .access_log_dir
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(format!(
+                "image-debug-{}.json",
+                chrono::Utc::now().format("%Y%m%dT%H%M%S")
+            ));
+        if let Err(e) = std::fs::write(&path, &req_body) {
+            tracing::error!("Failed to write image debug: {}", e);
+        }
+    }
 
     // Dump failed exchanges to file on 4xx/5xx
     if status.is_client_error() || status.is_server_error() {
