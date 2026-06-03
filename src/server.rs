@@ -304,7 +304,7 @@ async fn compact_via_chat(
     });
 
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %model, "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -414,7 +414,7 @@ async fn compact_via_anthropic(
     let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
 
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %anthropic_req.model, "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -577,7 +577,7 @@ async fn handle_chat_completions(
 
     // Determine upstream URL
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/responses");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %chat_req.model, "upstream");
     // Build upstream request
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -762,7 +762,7 @@ async fn handle_chat_passthrough(
     api_key: Option<String>,
 ) -> Response {
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %req.model, "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -884,7 +884,7 @@ async fn handle_chat_via_anthropic(
     let anthropic_req = convert_responses_to_anthropic(&responses_req);
 
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %req.model, "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1128,7 +1128,7 @@ async fn handle_responses(
     }
 
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/responses");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %responses_req.model, "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1260,7 +1260,7 @@ async fn handle_responses_via_chat(
     };
 
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %chat_req.model, "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1509,7 +1509,7 @@ async fn handle_responses_via_anthropic(
     let anthropic_req = convert_responses_to_anthropic_for(req, &provider.vendor);
 
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %anthropic_req.model, "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
