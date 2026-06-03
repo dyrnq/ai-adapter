@@ -1,3 +1,5 @@
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use std::fmt;
 
 /// Unified error type for ai-adapter.
@@ -70,7 +72,6 @@ impl fmt::Display for AdapterError {
 
 impl std::error::Error for AdapterError {}
 
-#[allow(dead_code)]
 impl AdapterError {
     pub fn status_code(&self) -> u16 {
         match self {
@@ -98,5 +99,50 @@ impl AdapterError {
             obj["error"]["param"] = serde_json::Value::String(p);
         }
         obj
+    }
+
+    /// Shortcut: 400 Bad Request
+    #[allow(dead_code)]
+    pub fn bad_request(msg: impl Into<String>) -> Self {
+        AdapterError::BadRequest {
+            message: msg.into(),
+            param: None,
+        }
+    }
+
+    /// Shortcut: 502 Bridge error
+    #[allow(dead_code)]
+    pub fn bridge(
+        msg: impl Into<String>,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        AdapterError::Bridge {
+            code: "bridge_error".into(),
+            message: msg.into(),
+            provider: provider.into(),
+            model: model.into(),
+        }
+    }
+
+    /// Convert to an SSE error string for stream fallback.
+    #[allow(dead_code)]
+    pub fn to_sse_error(&self) -> String {
+        let body = self.to_json();
+        serde_json::to_string(&body).unwrap_or_else(|_| {
+            r#"{"error":{"message":"internal error","type":"server_error"}}"#.to_string()
+        })
+    }
+}
+
+impl IntoResponse for AdapterError {
+    fn into_response(self) -> Response {
+        let status = self.status_code();
+        let body = self.to_json();
+        (
+            StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            axum::Json(body),
+        )
+            .into_response()
     }
 }
