@@ -149,6 +149,8 @@ pub struct AppConfig {
     /// Truncate reasoning to 32KB
     #[serde(rename = "truncateReasoning", default)]
     pub truncate_reasoning: bool,
+    #[serde(rename = "hideModelList", default)]
+    pub hide_model_list: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +210,7 @@ pub struct RuntimeConfig {
     pub prefer_client_key: bool,
     pub truncate_reasoning: bool,
     pub drop_images: bool,
+    pub hide_model_list: bool,
     /// Resolved alias map: alias -> (provider_name, upstream_model)
     pub alias_map: crate::translate::aliases::ModelAliasMap,
     /// All configured providers
@@ -227,6 +230,7 @@ impl Default for RuntimeConfig {
             prefer_client_key: false,
             truncate_reasoning: false,
             drop_images: false,
+            hide_model_list: false,
             alias_map: crate::translate::aliases::ModelAliasMap::new(),
             providers: Vec::new(),
             default_provider: "default".to_string(),
@@ -648,5 +652,9 @@ impl RuntimeConfig {
     /// Server handlers should use resolve_provider instead.
     pub fn model(&self) -> &str {
         ""
+    }
+
+    pub fn hide_model_list(&self) -> bool {
+        self.hide_model_list
     }
 }

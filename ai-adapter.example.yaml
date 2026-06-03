@@ -8,6 +8,7 @@ server:
   noCors: false
   preferClientKey: false
   truncateReasoning: false
+  hideModelList: false
   reqlog: true
   dropImages: true
 

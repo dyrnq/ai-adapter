@@ -97,7 +97,7 @@ pub fn build_router(
         .route("/v1/chat/completions", post(handle_chat_completions))
         .route("/v1/responses", post(handle_responses))
         .route("/v1/responses/compact", post(handle_compact))
-        .route("/v1/models", get(handle_models_v1))
+        .route("/v1/models", get(handle_models_list))
         .route("/health", get(handle_health))
         .route("/__/models", get(handle_models))
         .route("/__/session", get(handle_session_list))
@@ -169,7 +169,17 @@ async fn handle_models(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
-async fn handle_models_v1(State(state): State<AppState>) -> impl IntoResponse {
+async fn handle_models_list(State(state): State<AppState>) -> impl IntoResponse {
+    if state.config.hide_model_list() {
+        // Return aliases (recognizable by Codex CLI)
+        handle_models_v1_inner(&state).await.into_response()
+    } else {
+        // Passthrough to upstream (fast, real model names)
+        passthrough_request(&state, &HeaderMap::new(), Method::GET, &axum::http::Uri::from_static("/v1/models"), None).await
+    }
+}
+
+async fn handle_models_v1_inner(state: &AppState) -> impl IntoResponse {
     let models: Vec<serde_json::Value> = state
         .config
         .alias_map
@@ -1060,39 +1070,38 @@ async fn handle_responses(
         provider.api_key.clone().or(client_bearer)
     };
 
-    // Filter images if --drop-images is set (text-only upstreams)
-    let responses_req = if state.config.drop_images() {
-        let mut filtered = responses_req.clone();
-        if let Some(ref mut items) = filtered.input {
-            for item in items.iter_mut() {
-                if let crate::types::responses::ResponsesInputItem::Message {
-                    content: Some(ref mut parts),
-                    ..
-                } = item
-                {
-                    parts.retain(|p| {
-                        !matches!(
-                            p,
-                            crate::types::responses::ResponsesContentPart::InputImage { .. }
-                                | crate::types::responses::ResponsesContentPart::ImageUrl { .. }
-                        )
-                    });
-                    if parts.is_empty() {
-                        parts.push(crate::types::responses::ResponsesContentPart::InputText {
-                            text: "[image omitted]".to_string(),
+    // Apply drop_images + model override in one pass (avoids double clone)
+    let needs_drop = state.config.drop_images();
+    let needs_model = upstream_model != responses_req.model;
+    let responses_req = if needs_drop || needs_model {
+        let mut r = responses_req.clone();
+        if needs_model {
+            r.model = upstream_model.clone();
+        }
+        if needs_drop {
+            if let Some(ref mut items) = r.input {
+                for item in items.iter_mut() {
+                    if let crate::types::responses::ResponsesInputItem::Message {
+                        content: Some(ref mut parts),
+                        ..
+                    } = item
+                    {
+                        parts.retain(|p| {
+                            !matches!(
+                                p,
+                                crate::types::responses::ResponsesContentPart::InputImage { .. }
+                                    | crate::types::responses::ResponsesContentPart::ImageUrl { .. }
+                            )
                         });
+                        if parts.is_empty() {
+                            parts.push(crate::types::responses::ResponsesContentPart::InputText {
+                                text: "[image omitted]".to_string(),
+                            });
+                        }
                     }
                 }
             }
         }
-        filtered
-    } else {
-        responses_req
-    };
-
-    let responses_req = if upstream_model != responses_req.model {
-        let mut r = responses_req.clone();
-        r.model = upstream_model.clone();
         r
     } else {
         responses_req
