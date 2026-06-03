@@ -32,7 +32,8 @@ impl SqliteStore {
                 req_id TEXT,
                 in_tokens INTEGER,
                 out_tokens INTEGER,
-                cache_tokens INTEGER,
+                cache_hit_tokens INTEGER,
+                cache_miss_tokens INTEGER,
                 err_code TEXT,
                 err_msg TEXT,
                 req_body_preview TEXT,
@@ -44,6 +45,9 @@ impl SqliteStore {
                 session_id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+            -- Migration: add cache columns if missing (safe to re-run)
+            ALTER TABLE reqlog ADD COLUMN cache_hit_tokens INTEGER;
+            ALTER TABLE reqlog ADD COLUMN cache_miss_tokens INTEGER;
             CREATE TABLE IF NOT EXISTS reasoning (
                 session_id TEXT NOT NULL,
                 response_id TEXT NOT NULL,
@@ -111,7 +115,7 @@ impl StateStore for SqliteStore {
     fn reqlog(&self, entry: &super::store::ReqlogEntry) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO reqlog (ts, method, path, status, latency_ms, provider, model, req_id, in_tokens, out_tokens, cache_tokens, err_code, err_msg, req_body_preview, resp_body_preview, req_headers)
+            "INSERT INTO reqlog (ts, method, path, status, latency_ms, provider, model, req_id, in_tokens, out_tokens, cache_hit_tokens, cache_miss_tokens, err_code, err_msg, req_body_preview, resp_body_preview, req_headers)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             rusqlite::params![
                 entry.ts,
@@ -124,7 +128,8 @@ impl StateStore for SqliteStore {
                 entry.req_id,
                 entry.in_tokens,
                 entry.out_tokens,
-                entry.cache_tokens,
+                entry.cache_hit_tokens,
+                entry.cache_miss_tokens,
                 entry.err_code,
                 entry.err_msg,
                 entry.req_body_preview,

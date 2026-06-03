@@ -32,6 +32,12 @@ impl SessionStore {
             .await
             .unwrap_or_default()
     }
+
+    /// Log an upstream request to the persistent store (SQLite).
+    pub async fn log_request(&self, entry: store::ReqlogEntry) -> anyhow::Result<()> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || store.reqlog(&entry)).await?
+    }
 }
 
 #[derive(Clone)]
