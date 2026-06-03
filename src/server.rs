@@ -1000,16 +1000,28 @@ async fn handle_chat_via_anthropic(
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         Sse::new(stream).into_response()
     } else {
-        // Non-stream: passthrough the response body as-is
+        // Non-stream: convert Anthropic response → Chat response
         match upstream_resp.bytes().await {
             Ok(body) => {
-                let mut response = Response::new(Body::from(body));
-                *response.status_mut() = status;
-                response.headers_mut().insert(
-                    HeaderName::from_static("content-type"),
-                    HeaderValue::from_static("application/json"),
-                );
-                response
+                match serde_json::from_slice::<crate::types::anthropic::AnthropicResponse>(&body) {
+                    Ok(anthropic_resp) => {
+                        let model = anthropic_resp.model.clone();
+                        let responses_resp =
+                            convert_anthropic_to_responses(&anthropic_resp, &model);
+                        let chat_resp = chat_resp_to_responses(&responses_resp, &model);
+                        (
+                            StatusCode::OK,
+                            [("content-type", "application/json")],
+                            serde_json::to_string(&chat_resp).unwrap_or_default(),
+                        )
+                            .into_response()
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to parse Anthropic response: {}", e);
+                        AdapterError::bad_request(format!("Invalid upstream response: {}", e))
+                            .into_response()
+                    }
+                }
             }
             Err(e) => (
                 StatusCode::BAD_GATEWAY,
