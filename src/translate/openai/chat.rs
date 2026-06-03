@@ -614,9 +614,14 @@ fn extract_text_from_content_part(part: &ResponsesContentPart) -> Option<String>
 #[allow(dead_code)]
 fn map_finish_reason_to_status(reason: Option<&str>) -> String {
     match reason {
-        Some("stop") | Some("tool_calls") => "completed",
-        Some("length") | Some("content_filter") => "incomplete",
-        _ => "completed",
+        Some("stop") | Some("tool_calls") | Some("function_call") => "completed",
+        Some("length") | Some("content_filter") | Some("sensitive") => "incomplete",
+        Some("model_context_window_exceeded") | Some("network_error") => "failed",
+        None => "completed",
+        _ => {
+            tracing::warn!("Unknown finish_reason: {:?}, treating as completed", reason);
+            "completed"
+        }
     }
     .to_string()
 }

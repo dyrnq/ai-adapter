@@ -217,9 +217,34 @@ pub fn convert_chat_to_responses_response(
     for choice in &chat.choices {
         // -- finish_reason → status ------------------------------------------------
         if let Some(ref finish) = choice.finish_reason {
-            if finish == "length" {
-                status = "incomplete";
-                incomplete_details = Some(serde_json::json!({"reason": "max_output_tokens"}));
+            match finish.as_str() {
+                "stop" | "tool_calls" | "function_call" => {
+                    status = "completed";
+                }
+                "length" => {
+                    status = "incomplete";
+                    incomplete_details =
+                        Some(serde_json::json!({"reason": "max_output_tokens"}));
+                }
+                "content_filter" | "sensitive" => {
+                    status = "incomplete";
+                    incomplete_details =
+                        Some(serde_json::json!({"reason": "content_filter"}));
+                }
+                "model_context_window_exceeded" => {
+                    status = "incomplete";
+                    incomplete_details =
+                        Some(serde_json::json!({"reason": "max_output_tokens"}));
+                }
+                "network_error" => {
+                    status = "failed";
+                }
+                _ => {
+                    tracing::warn!(
+                        "Unknown finish_reason: {:?}, treating as completed",
+                        finish
+                    );
+                }
             }
         }
 
