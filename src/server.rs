@@ -20,10 +20,12 @@ use tower_http::{
 use tracing::Level;
 
 use crate::config::{RuntimeConfig, UpstreamFormat};
+use crate::error::AdapterError;
 use crate::state::{ReasoningCache, SessionStore};
 use crate::stream::sse::{
     AnthropicStreamTranslator, ChatStreamToResponsesTranslator, ResponsesStreamToChatTranslator,
 };
+use crate::translate::compatibility::check_compatibility;
 use crate::translate::{
     chat_resp_to_responses, convert_anthropic_to_responses, convert_chat_to_responses,
     convert_chat_to_responses_response, convert_for_deepseek, convert_responses_to_anthropic,
@@ -188,10 +190,7 @@ async fn handle_compact(
     let compact_req: CompactRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                axum::Json(serde_json::json!({"error": {"message": format!("Invalid compact request: {}", e)}})),
-            )
+            return AdapterError::bad_request(format!("Invalid compact request: {}", e))
                 .into_response();
         }
     };
@@ -511,12 +510,7 @@ async fn handle_chat_completions(
     let chat_req: ChatCompletionsRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                serde_json::json!({"error": {"message": format!("Invalid request: {}", e)}})
-                    .to_string(),
-            )
-                .into_response();
+            return AdapterError::bad_request(format!("Invalid request: {}", e)).into_response();
         }
     };
 
@@ -530,6 +524,23 @@ async fn handle_chat_completions(
             .map(|s| s.to_string())
             .or_else(|| extract_bearer(&headers))
     };
+
+    // Compatibility diagnostics
+    if !is_stream {
+        let has_tools = chat_req.tools.as_ref().is_some_and(|t| !t.is_empty());
+        let fmt = chat_req.response_format.as_ref().map(|rf| match rf {
+            crate::types::chat::ResponseFormat::Text => "text",
+            crate::types::chat::ResponseFormat::JsonObject => "json_object",
+            crate::types::chat::ResponseFormat::JsonSchema { .. } => "json_schema",
+        });
+        check_compatibility(
+            state.config.vendor(),
+            has_tools,
+            chat_req.tool_choice.as_ref().and_then(|v| v.as_str()),
+            chat_req.reasoning_effort.is_some(),
+            fmt,
+        );
+    }
 
     // Resolve model alias to upstream model name
     // "gpt-5.5" -> "deepseek-v4-pro", "deepseek/deepseek-v4-pro" -> "deepseek-v4-pro"
@@ -592,12 +603,7 @@ async fn handle_chat_completions(
         Ok(r) => r,
         Err(e) => {
             tracing::error!("Upstream request failed: {}", e);
-            return (
-                StatusCode::BAD_GATEWAY,
-                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
-                    .to_string(),
-            )
-                .into_response();
+            return AdapterError::bad_request(format!("Upstream error: {}", e)).into_response();
         }
     };
 
@@ -721,10 +727,7 @@ async fn handle_chat_completions(
             Ok(b) => b,
             Err(e) => {
                 tracing::error!("Failed to parse upstream response: {}", e);
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    serde_json::json!({"error": {"message": format!("Invalid upstream response: {}", e)}}).to_string(),
-                )
+                return AdapterError::bad_request(format!("Invalid upstream response: {}", e))
                     .into_response();
             }
         };
@@ -733,10 +736,7 @@ async fn handle_chat_completions(
             match serde_json::from_value(upstream_body) {
                 Ok(r) => r,
                 Err(e) => {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        serde_json::json!({"error": {"message": format!("Failed to parse: {}", e)}}).to_string(),
-                    )
+                    return AdapterError::bad_request(format!("Failed to parse: {}", e))
                         .into_response();
                 }
             };
@@ -784,12 +784,7 @@ async fn handle_chat_passthrough(
     {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
-                    .to_string(),
-            )
-                .into_response();
+            return AdapterError::bad_request(format!("Upstream error: {}", e)).into_response();
         }
     };
 
@@ -922,12 +917,7 @@ async fn handle_chat_via_anthropic(
     {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
-                    .to_string(),
-            )
-                .into_response();
+            return AdapterError::bad_request(format!("Upstream error: {}", e)).into_response();
         }
     };
 
@@ -1033,12 +1023,7 @@ async fn handle_responses(
     let responses_req: ResponsesRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                serde_json::json!({"error": {"message": format!("Invalid request: {}", e)}})
-                    .to_string(),
-            )
-                .into_response();
+            return AdapterError::bad_request(format!("Invalid request: {}", e)).into_response();
         }
     };
 
@@ -1283,12 +1268,7 @@ async fn handle_responses_via_chat(
     {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
-                    .to_string(),
-            )
-                .into_response();
+            return AdapterError::bad_request(format!("Upstream error: {}", e)).into_response();
         }
     };
 
@@ -1418,10 +1398,7 @@ async fn handle_responses_via_chat(
         let upstream_body: Value = match upstream_resp.json().await {
             Ok(b) => b,
             Err(e) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    serde_json::json!({"error": {"message": format!("Invalid upstream response: {}", e)}}).to_string(),
-                )
+                return AdapterError::bad_request(format!("Invalid upstream response: {}", e))
                     .into_response();
             }
         };
@@ -1554,12 +1531,7 @@ async fn handle_responses_via_anthropic(
     {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                serde_json::json!({"error": {"message": format!("Upstream error: {}", e)}})
-                    .to_string(),
-            )
-                .into_response();
+            return AdapterError::bad_request(format!("Upstream error: {}", e)).into_response();
         }
     };
 
