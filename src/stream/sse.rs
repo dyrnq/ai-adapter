@@ -496,6 +496,13 @@ impl AnthropicStreamTranslator {
         }
     }
 
+    /// Return collected usage data for reqlog.
+    pub fn get_usage(&self) -> (u32, u32, u32, u32) {
+        let hit = self.cache_read_tokens.unwrap_or(0);
+        let miss = self.cache_creation_tokens.unwrap_or(0);
+        (self.input_tokens, self.output_tokens, hit, miss)
+    }
+
     pub fn make_completed_response(&self) -> ResponsesResponse {
         self.make_response_with_status("completed")
     }
@@ -566,6 +573,22 @@ impl ChatStreamToResponsesTranslator {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64
+    }
+
+    /// Return collected usage data for reqlog.
+    pub fn get_usage(&self) -> (u32, u32, u32, u32) {
+        match &self.usage {
+            Some(u) => {
+                let hit = u
+                    .input_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.cached_tokens)
+                    .unwrap_or(0);
+                let miss = u.input_tokens.saturating_sub(hit);
+                (u.input_tokens, u.output_tokens, hit, miss)
+            }
+            None => (0, 0, 0, 0),
+        }
     }
 
     pub fn process_chunk(&mut self, chunk: &serde_json::Value) -> Vec<ResponsesStreamEvent> {
