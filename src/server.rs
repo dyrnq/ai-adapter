@@ -21,6 +21,7 @@ use tracing::Level;
 
 use crate::config::{ResolvedProvider, RuntimeConfig, UpstreamFormat};
 use crate::error::AdapterError;
+use crate::state::store::ReqlogEntry;
 use crate::state::{ReasoningCache, SessionStore};
 use crate::stream::sse::{
     AnthropicStreamTranslator, ChatStreamToResponsesTranslator, ResponsesStreamToChatTranslator,
@@ -867,6 +868,7 @@ async fn handle_chat_passthrough(
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         Sse::new(stream).into_response()
     } else {
+        let start = Instant::now();
         let body = match upstream_resp.bytes().await {
             Ok(b) => b,
             Err(e) => {
@@ -878,6 +880,42 @@ async fn handle_chat_passthrough(
                     .into_response();
             }
         };
+
+        // Log request
+        if status.is_success() {
+            if let Ok(chat_resp) =
+                serde_json::from_slice::<crate::types::chat::ChatCompletionsResponse>(&body)
+            {
+                let (in_tok, out_tok, cache_hit) = chat_resp
+                    .usage
+                    .as_ref()
+                    .map(|u| {
+                        let hit = u
+                            .prompt_tokens_details
+                            .as_ref()
+                            .and_then(|d| d.cached_tokens)
+                            .unwrap_or(0);
+                        (u.prompt_tokens, u.completion_tokens, hit)
+                    })
+                    .unwrap_or((0, 0, 0));
+                let cache_miss = in_tok.saturating_sub(cache_hit);
+                log_request(
+                    state,
+                    start,
+                    "POST",
+                    "/v1/chat/completions",
+                    status.as_u16(),
+                    provider,
+                    &req.model,
+                    Some(in_tok),
+                    Some(out_tok),
+                    Some(cache_hit),
+                    Some(cache_miss),
+                )
+                .await;
+            }
+        }
+
         let mut response = Response::new(Body::from(body));
         *response.status_mut() = status;
         response.headers_mut().insert(
@@ -1000,6 +1038,7 @@ async fn handle_chat_via_anthropic(
         Sse::new(stream).into_response()
     } else {
         // Non-stream: convert Anthropic response → Chat response
+        let start = Instant::now();
         match upstream_resp.bytes().await {
             Ok(body) => {
                 match serde_json::from_slice::<crate::types::anthropic::AnthropicResponse>(&body) {
@@ -1008,6 +1047,26 @@ async fn handle_chat_via_anthropic(
                         let responses_resp =
                             convert_anthropic_to_responses(&anthropic_resp, &model);
                         let chat_resp = chat_resp_to_responses(&responses_resp, &model);
+
+                        // Log request
+                        let u = &anthropic_resp.usage;
+                        let cache_hit = u.cache_read_input_tokens.unwrap_or(0);
+                        let cache_miss = u.cache_creation_input_tokens.unwrap_or(0);
+                        log_request(
+                            state,
+                            start,
+                            "POST",
+                            "/v1/chat/completions",
+                            StatusCode::OK.as_u16(),
+                            provider,
+                            &model,
+                            Some(u.input_tokens),
+                            Some(u.output_tokens),
+                            Some(cache_hit),
+                            Some(cache_miss),
+                        )
+                        .await;
+
                         (
                             StatusCode::OK,
                             [("content-type", "application/json")],
@@ -1159,6 +1218,7 @@ async fn handle_responses(
 
     let body_json = serde_json::to_string(&responses_req).unwrap_or_default();
 
+    let start = Instant::now();
     match state
         .client
         .post(&upstream_url)
@@ -1181,6 +1241,42 @@ async fn handle_responses(
                         .into_response();
                 }
             };
+
+            // Log request (parse usage from response body)
+            if status.is_success() {
+                if let Ok(responses_resp) = serde_json::from_slice::<
+                    crate::types::responses::ResponsesResponse,
+                >(&body_bytes)
+                {
+                    let (in_tok, out_tok, cache_hit) = responses_resp
+                        .usage
+                        .as_ref()
+                        .map(|u| {
+                            let hit = u
+                                .input_tokens_details
+                                .as_ref()
+                                .and_then(|d| d.cached_tokens)
+                                .unwrap_or(0);
+                            (u.input_tokens, u.output_tokens, hit)
+                        })
+                        .unwrap_or((0, 0, 0));
+                    let cache_miss = in_tok.saturating_sub(cache_hit);
+                    log_request(
+                        &state,
+                        start,
+                        "POST",
+                        "/v1/responses",
+                        status.as_u16(),
+                        provider,
+                        &upstream_model,
+                        Some(in_tok),
+                        Some(out_tok),
+                        Some(cache_hit),
+                        Some(cache_miss),
+                    )
+                    .await;
+                }
+            }
 
             let mut response = Response::new(Body::from(body_bytes));
             *response.status_mut() = status;
@@ -1295,6 +1391,7 @@ async fn handle_responses_via_chat(
         &body_json[..body_json.len().min(2000)]
     );
 
+    let start = Instant::now();
     let upstream_resp = match state
         .client
         .post(&upstream_url)
@@ -1344,6 +1441,10 @@ async fn handle_responses_via_chat(
         let response_id = format!("resp_{}", uuid::Uuid::new_v4());
         let session_id_for_save = session_id.clone();
         let is_xiaomimimo = matches!(provider.vendor, crate::config::UpstreamVendor::XiaomiMimo);
+        let stream_store = state.session_store.clone();
+        let stream_enable_reqlog = state.config.enable_reqlog;
+        let stream_provider = provider.name.clone();
+        let stream_start = start;
         tokio::spawn(async move {
             let mut translator = ChatStreamToResponsesTranslator::new(&model);
             translator.response_id = response_id.clone();
@@ -1423,6 +1524,33 @@ async fn handle_responses_via_chat(
                     tracing::error!("Failed to save reasoning cache: {}", e);
                 }
             }
+
+            // Log request
+            if stream_enable_reqlog {
+                let (in_tok, out_tok, hit, miss) = translator.get_usage();
+                let entry = ReqlogEntry {
+                    ts: chrono::Utc::now()
+                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                        .to_string(),
+                    method: "POST".to_string(),
+                    path: "/v1/responses".to_string(),
+                    status: 200,
+                    latency_ms: stream_start.elapsed().as_millis(),
+                    provider: stream_provider,
+                    model: model.clone(),
+                    req_id: None,
+                    in_tokens: Some(in_tok),
+                    out_tokens: Some(out_tok),
+                    cache_hit_tokens: Some(hit),
+                    cache_miss_tokens: Some(miss),
+                    err_code: None,
+                    err_msg: None,
+                    req_body_preview: None,
+                    resp_body_preview: None,
+                    req_headers: None,
+                };
+                stream_store.log_request(entry).await.ok();
+            }
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -1450,6 +1578,7 @@ async fn handle_responses_via_chat(
                 }
             };
 
+        let start = Instant::now();
         let mut responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
 
         // Strip xiaomimimo reasoning markers from output text
@@ -1481,6 +1610,37 @@ async fn handle_responses_via_chat(
                     }
                 }
             }
+        }
+
+        // Log request
+        {
+            let (in_tok, out_tok, cache_hit, cache_miss) = chat_resp
+                .usage
+                .as_ref()
+                .map(|u| {
+                    let hit = u
+                        .prompt_tokens_details
+                        .as_ref()
+                        .and_then(|d| d.cached_tokens)
+                        .unwrap_or(0);
+                    let miss = u.prompt_tokens.saturating_sub(hit);
+                    (u.prompt_tokens, u.completion_tokens, hit, miss)
+                })
+                .unwrap_or((0, 0, 0, 0));
+            log_request(
+                state,
+                start,
+                "POST",
+                "/v1/responses",
+                StatusCode::OK.as_u16(),
+                provider,
+                &upstream_model,
+                Some(in_tok),
+                Some(out_tok),
+                Some(cache_hit),
+                Some(cache_miss),
+            )
+            .await;
         }
 
         (
@@ -1554,6 +1714,7 @@ async fn handle_responses_via_anthropic(
     let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
     tracing::debug!("Responses->Anthropic request to {}", upstream_url);
 
+    let start = Instant::now();
     let upstream_resp = match state
         .client
         .post(&upstream_url)
@@ -1602,6 +1763,10 @@ async fn handle_responses_via_anthropic(
         let response_id = format!("resp_{}", uuid::Uuid::new_v4());
         let session_id_for_save = session_id.clone();
         let _is_xiaomimimo = matches!(provider.vendor, crate::config::UpstreamVendor::XiaomiMimo);
+        let stream_store = state.session_store.clone();
+        let stream_enable_reqlog = state.config.enable_reqlog;
+        let stream_provider = provider.name.clone();
+        let stream_start = start;
         tokio::spawn(async move {
             let mut translator = AnthropicStreamTranslator::new(&model);
             translator.response_id = response_id.clone();
@@ -1671,6 +1836,33 @@ async fn handle_responses_via_anthropic(
                     tracing::error!("Failed to save reasoning cache: {}", e);
                 }
             }
+
+            // Log request
+            if stream_enable_reqlog {
+                let (in_tok, out_tok, hit, miss) = translator.get_usage();
+                let entry = ReqlogEntry {
+                    ts: chrono::Utc::now()
+                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                        .to_string(),
+                    method: "POST".to_string(),
+                    path: "/v1/responses".to_string(),
+                    status: 200,
+                    latency_ms: stream_start.elapsed().as_millis(),
+                    provider: stream_provider,
+                    model: model.clone(),
+                    req_id: None,
+                    in_tokens: Some(in_tok),
+                    out_tokens: Some(out_tok),
+                    cache_hit_tokens: Some(hit),
+                    cache_miss_tokens: Some(miss),
+                    err_code: None,
+                    err_msg: None,
+                    req_body_preview: None,
+                    resp_body_preview: None,
+                    req_headers: None,
+                };
+                stream_store.log_request(entry).await.ok();
+            }
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -1701,6 +1893,7 @@ async fn handle_responses_via_anthropic(
                 }
             };
 
+        let start = Instant::now();
         let responses_resp = convert_anthropic_to_responses(&anthropic_resp, &upstream_model);
 
         // Save reasoning to cache for multi-turn (non-stream)
@@ -1727,6 +1920,27 @@ async fn handle_responses_via_anthropic(
                     .save(sid, &responses_resp.id, &reasoning_text)
                     .await;
             }
+        }
+
+        // Log request
+        {
+            let u = &anthropic_resp.usage;
+            let cache_hit = u.cache_read_input_tokens.unwrap_or(0);
+            let cache_miss = u.cache_creation_input_tokens.unwrap_or(0);
+            log_request(
+                state,
+                start,
+                "POST",
+                "/v1/responses",
+                StatusCode::OK.as_u16(),
+                provider,
+                &upstream_model,
+                Some(u.input_tokens),
+                Some(u.output_tokens),
+                Some(cache_hit),
+                Some(cache_miss),
+            )
+            .await;
         }
 
         (
@@ -1779,6 +1993,47 @@ async fn handle_passthrough(
     uri: axum::http::Uri,
 ) -> Response {
     passthrough_request(&state, &headers, Method::GET, &uri, None).await
+}
+#[allow(clippy::too_many_arguments)]
+async fn log_request(
+    state: &AppState,
+    start: Instant,
+    method: &str,
+    path: &str,
+    status: u16,
+    provider: &crate::config::ResolvedProvider,
+    model: &str,
+    in_tokens: Option<u32>,
+    out_tokens: Option<u32>,
+    cache_hit_tokens: Option<u32>,
+    cache_miss_tokens: Option<u32>,
+) {
+    if !state.config.enable_reqlog {
+        return;
+    }
+    let latency = start.elapsed().as_millis();
+    let entry = ReqlogEntry {
+        ts: chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string(),
+        method: method.to_string(),
+        path: path.to_string(),
+        status,
+        latency_ms: latency,
+        provider: provider.name.clone(),
+        model: model.to_string(),
+        req_id: None,
+        in_tokens,
+        out_tokens,
+        cache_hit_tokens,
+        cache_miss_tokens,
+        err_code: None,
+        err_msg: None,
+        req_body_preview: None,
+        resp_body_preview: None,
+        req_headers: None,
+    };
+    state.session_store.log_request(entry).await.ok();
 }
 
 async fn passthrough_request(
