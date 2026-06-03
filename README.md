@@ -32,6 +32,8 @@ Codex / Client          AI Adapter :9090          Upstream
 - **Tool calling**: Full function call streaming, flat & nested tool format support
 - **Compaction**: `POST /v1/responses/compact` for Codex CLI context management
 - **Config-driven**: YAML config files with `providers` and `modelAliases`, plus CLI/env overrides
+- **Auto-detect format**: `format` is optional — inferred from `base_url` (anthropic/openai-chat/responses)
+- **HTTP/2 upstream**: Transparent ALPN negotiation for supported backends
 - **Health & models API**: `/health` with uptime info, `/__/models` listing configured aliases
 - **Error dumps**: Saves failed exchanges with auth redaction
 - **Structured logging**: Human-readable to stderr, JSON to daily-rotated files
@@ -52,6 +54,8 @@ Point Codex at `http://127.0.0.1:9090/v1`.
 
 ### YAML Config File
 
+> **Note**: `format` is optional and auto-detected from `baseUrl` when omitted. Set to `anthropic`, `openai-chat`, `openai-responses`, or `"auto"`.
+
 ```yaml
 server:
   addr: "0.0.0.0:9090"
@@ -62,7 +66,7 @@ server:
 providers:
   - name: deepseek
     baseUrl: "https://api.deepseek.com/anthropic"
-    format: anthropic
+    format: anthropic   # optional — auto-detected from base_url
     apikey: "${DEEPSEEK_API_KEY}"
     vendor: deepseek
     dropImages: true
@@ -83,7 +87,7 @@ modelAliases:
 | ------------------- | ------------------- | ---------------------- | -------------------------------------------- |
 | `-c, --config`      | —                   | —                      | Config file (YAML/JSON)                      |
 | `--base-url`        | `UPSTREAM_BASE_URL` | —                      | Upstream API base URL (single provider mode) |
-| `--upstream-format` | `UPSTREAM_FORMAT`   | `openai-chat`          | `anthropic`, `openai-chat`, `responses`      |
+| `--upstream-format` | `UPSTREAM_FORMAT`   | auto-detect from URL   | `anthropic`, `openai-chat`, `openai-responses`|
 | `--vendor`          | —                   | `auto`                 | `deepseek`, `openai`, `anthropic`, `xiaomimimo`, `auto` |
 | `--apikey`          | `UPSTREAM_API_KEY`  | —                      | Upstream API key                             |
 | `--prefer-client-key`| —                   | `false`                | Prefer Authorization header over config key  |
