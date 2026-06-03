@@ -175,7 +175,14 @@ async fn handle_models_list(State(state): State<AppState>) -> impl IntoResponse 
         handle_models_v1_inner(&state).await.into_response()
     } else {
         // Passthrough to upstream (fast, real model names)
-        passthrough_request(&state, &HeaderMap::new(), Method::GET, &axum::http::Uri::from_static("/v1/models"), None).await
+        passthrough_request(
+            &state,
+            &HeaderMap::new(),
+            Method::GET,
+            &axum::http::Uri::from_static("/v1/models"),
+            None,
+        )
+        .await
     }
 }
 

@@ -71,7 +71,9 @@ impl UpstreamFormat {
         match s.to_lowercase().as_str() {
             "anthropic" => Some(UpstreamFormat::Anthropic),
             "openai-chat" | "openai_chat" | "openai" => Some(UpstreamFormat::OpenAiChat),
-            "responses" | "openai-responses" | "openai_responses" => Some(UpstreamFormat::Responses),
+            "responses" | "openai-responses" | "openai_responses" => {
+                Some(UpstreamFormat::Responses)
+            }
             "auto" | "" => None,
             _ => None,
         }
@@ -79,7 +81,9 @@ impl UpstreamFormat {
 
     /// Auto-detect format from base_url when not explicitly configured.
     pub fn resolve(base_url: &str) -> UpstreamFormat {
-        let path = base_url.trim_start_matches("https://").trim_start_matches("http://");
+        let path = base_url
+            .trim_start_matches("https://")
+            .trim_start_matches("http://");
         // Anthropic messages API
         if path.contains("/anthropic") || path.contains("anthropic.com") {
             UpstreamFormat::Anthropic
