@@ -71,8 +71,24 @@ impl UpstreamFormat {
         match s.to_lowercase().as_str() {
             "anthropic" => Some(UpstreamFormat::Anthropic),
             "openai-chat" | "openai_chat" | "openai" => Some(UpstreamFormat::OpenAiChat),
-            "responses" => Some(UpstreamFormat::Responses),
+            "responses" | "openai-responses" | "openai_responses" => Some(UpstreamFormat::Responses),
+            "auto" | "" => None,
             _ => None,
+        }
+    }
+
+    /// Auto-detect format from base_url when not explicitly configured.
+    pub fn resolve(base_url: &str) -> UpstreamFormat {
+        let path = base_url.trim_start_matches("https://").trim_start_matches("http://");
+        // Anthropic messages API
+        if path.contains("/anthropic") || path.contains("anthropic.com") {
+            UpstreamFormat::Anthropic
+        // Responses API
+        } else if path.contains("/responses") || path.contains("/v1/responses") {
+            UpstreamFormat::Responses
+        // Default: OpenAI Chat
+        } else {
+            UpstreamFormat::OpenAiChat
         }
     }
 }
@@ -89,8 +105,9 @@ pub struct ProviderConfig {
     /// Upstream base URL
     #[serde(rename = "baseUrl")]
     pub base_url: String,
-    /// Upstream API format
-    pub format: String,
+    /// Upstream API format (auto-detected from base_url if not specified or "auto")
+    #[serde(default)]
+    pub format: Option<String>,
     /// API key
     pub apikey: Option<String>,
     /// Optional list of model names this provider serves
@@ -363,8 +380,11 @@ pub fn load_config(
                     Some("xiaomimimo") => UpstreamVendor::XiaomiMimo,
                     _ => UpstreamVendor::Auto.resolve(&p.base_url),
                 };
-                let format =
-                    UpstreamFormat::from_str(&p.format).unwrap_or(UpstreamFormat::OpenAiChat);
+                let format = p
+                    .format
+                    .as_deref()
+                    .and_then(UpstreamFormat::from_str)
+                    .unwrap_or_else(|| UpstreamFormat::resolve(&p.base_url));
                 config.providers.push(ResolvedProvider {
                     name: p.name.clone(),
                     base_url: p.base_url.clone(),
@@ -393,7 +413,7 @@ pub fn load_config(
                 .format
                 .as_deref()
                 .and_then(UpstreamFormat::from_str)
-                .unwrap_or(UpstreamFormat::OpenAiChat);
+                .unwrap_or_else(|| UpstreamFormat::resolve(&base_url));
             config.providers.push(ResolvedProvider {
                 name: "default".to_string(),
                 base_url,
@@ -432,7 +452,7 @@ pub fn load_config(
             let format = std::env::var("UPSTREAM_FORMAT")
                 .ok()
                 .and_then(|f| UpstreamFormat::from_str(&f))
-                .unwrap_or(UpstreamFormat::OpenAiChat);
+                .unwrap_or_else(|| UpstreamFormat::resolve(&url));
             config.providers.push(ResolvedProvider {
                 name: "default".to_string(),
                 base_url: url,
@@ -464,7 +484,7 @@ pub fn load_config(
         };
         let format = cli_format
             .and_then(UpstreamFormat::from_str)
-            .unwrap_or(UpstreamFormat::OpenAiChat);
+            .unwrap_or_else(|| UpstreamFormat::resolve(url));
 
         // Replace or prepend "cli" provider
         config
