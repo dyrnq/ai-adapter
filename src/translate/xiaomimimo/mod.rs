@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod convert;
+pub mod provider;
 
 #[allow(unused_imports)]
 pub use convert::convert_anthropic_to_responses;

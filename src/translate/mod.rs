@@ -1,6 +1,7 @@
 pub mod anthropic;
 pub mod deepseek;
 pub mod openai;
+pub mod provider;
 pub mod xiaomimimo;
 
 use crate::config::{UpstreamFormat, UpstreamVendor};
@@ -30,13 +31,13 @@ pub fn convert_responses_to_chat(
     }
 }
 
+/// DeepSeek-specific Anthropic conversion (Plan B: thinking:disabled, tool merging)
+pub use deepseek::anthropic::{convert_anthropic_to_responses, convert_responses_to_anthropic};
 /// Dispatch for DeepSeek with reasoning cache support
 pub use deepseek::chat::convert_responses_to_chat as convert_for_deepseek;
 
-/// DeepSeek-specific Anthropic conversion (Plan B: thinking:disabled, tool merging)
-pub use deepseek::anthropic::{convert_anthropic_to_responses, convert_responses_to_anthropic};
-
 /// Vendor-aware dispatch for Anthropic conversion
+#[allow(dead_code)]
 pub fn convert_responses_to_anthropic_for(
     responses: &ResponsesRequest,
     vendor: &UpstreamVendor,
@@ -51,3 +52,7 @@ pub use deepseek::chat::{
     convert_chat_to_responses, convert_chat_to_responses_response,
     convert_responses_to_chat_response as chat_resp_to_responses,
 };
+pub mod aliases;
+pub mod compatibility;
+pub mod output_contract;
+pub mod tool_degrade;

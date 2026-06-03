@@ -16,8 +16,8 @@ pub fn run(format: &str) {
             println!("server:");
             println!("  addr: \"{}\"", config.addr);
             println!();
-            println!("baseUrl: \"{}\"", config.base_url);
-            println!("format: {}", config.upstream_format);
+            println!("baseUrl: \"{}\"", config.base_url());
+            println!("format: {}", config.upstream_format());
             println!();
             println!("# Resolved defaults:");
             config.print();

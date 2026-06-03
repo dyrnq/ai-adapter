@@ -1,0 +1,59 @@
+# =============================================================================
+# ai-adapter multi-provider configuration
+# =============================================================================
+server:
+  addr: "0.0.0.0:9090"
+  accessLogDir: "~/.ai-adapter/logs"
+  logHttp: false
+  noCors: false
+  preferClientKey: false
+  truncateReasoning: false
+  reqlog: true
+  dropImages: true
+
+# Multiple upstream providers
+providers:
+  - name: deepseek
+    baseUrl: "https://api.deepseek.com/anthropic"
+    format: anthropic
+    apikey: "${DEEPSEEK_API_KEY}"
+    vendor: deepseek
+    dropImages: true
+    models:
+      - deepseek-v4-pro
+      - deepseek-v4-flash
+
+  - name: openai
+    baseUrl: "https://api.openai.com"
+    format: openai-chat
+    apikey: "${OPENAI_API_KEY}"
+    vendor: openai
+    models:
+      - gpt-4o
+
+  - name: xiaomi
+    baseUrl: "https://api.xiaomimimo.com/v1"
+    format: openai-chat
+    apikey: "${MIMO_API_KEY}"
+    vendor: xiaomimimo
+    models:
+      - mimo-v2.5-pro
+
+  - name: zhipu
+    baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4"
+    format: openai-chat
+    apikey: "${ZHIPU_API_KEY}"
+    vendor: auto
+    models:
+      - glm-5.1
+
+# Model aliases: alias -> provider/model
+modelAliases:
+  "gpt-5.5": "deepseek/deepseek-v4-pro"
+  "gpt-5.4": "deepseek/deepseek-v4-pro"
+  "gpt-5.4-mini": "zhipu/glm-5.1"
+  "gpt-5.3-codex": "deepseek/deepseek-v4-pro"
+  "deepseek-v4-pro": "deepseek/deepseek-v4-pro"
+  "mimo-v2.5-pro": "xiaomi/mimo-v2.5-pro"
+  "glm-5.1": "zhipu/glm-5.1"
+  "*": "deepseek/deepseek-v4-pro"
