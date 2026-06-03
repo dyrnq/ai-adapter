@@ -190,6 +190,22 @@ impl StateStore for SqliteStore {
             }
             tracing::info!("Migrated {} reasoning entries from redb", reasoning_count);
         }
+
+        let migrated_path = redb_path.with_extension("redb.migrated");
+        if let Err(e) = std::fs::rename(redb_path, &migrated_path) {
+            tracing::warn!(
+                "Failed to rename {} -> {}: {}",
+                redb_path.display(),
+                migrated_path.display(),
+                e
+            );
+        } else {
+            tracing::info!(
+                "Renamed {} -> {}",
+                redb_path.display(),
+                migrated_path.display()
+            );
+        }
         Ok(())
     }
 }
