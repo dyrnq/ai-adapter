@@ -25,7 +25,6 @@ use crate::state::{ReasoningCache, SessionStore};
 use crate::stream::sse::{
     AnthropicStreamTranslator, ChatStreamToResponsesTranslator, ResponsesStreamToChatTranslator,
 };
-use crate::translate::compatibility::check_compatibility;
 use crate::translate::{
     chat_resp_to_responses, convert_anthropic_to_responses, convert_chat_to_responses,
     convert_chat_to_responses_response, convert_for_deepseek, convert_responses_to_anthropic,
@@ -555,23 +554,6 @@ async fn handle_chat_completions(
 
     let mut chat_req = chat_req;
     chat_req.model = upstream_model;
-
-    // Compatibility diagnostics
-    if !is_stream {
-        let has_tools = chat_req.tools.as_ref().is_some_and(|t| !t.is_empty());
-        let fmt = chat_req.response_format.as_ref().map(|rf| match rf {
-            crate::types::chat::ResponseFormat::Text => "text",
-            crate::types::chat::ResponseFormat::JsonObject => "json_object",
-            crate::types::chat::ResponseFormat::JsonSchema { .. } => "json_schema",
-        });
-        check_compatibility(
-            &provider.vendor,
-            has_tools,
-            chat_req.tool_choice.as_ref().and_then(|v| v.as_str()),
-            chat_req.reasoning_effort.is_some(),
-            fmt,
-        );
-    }
 
     // Route based on provider format
     match provider.format {
