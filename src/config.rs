@@ -237,11 +237,8 @@ impl Default for RuntimeConfig {
 impl RuntimeConfig {
     /// Pretty-print the resolved config (masks api_key)
     pub fn print(&self) {
-        println!("addr:             {}", self.addr);
-        for p in &self.providers {
-            let masked_key = p
-                .api_key
-                .as_deref()
+        fn mask(key: &Option<String>) -> String {
+            key.as_deref()
                 .map(|k| {
                     if k.len() > 8 {
                         format!("{}****{}", &k[..4], &k[k.len() - 4..])
@@ -249,18 +246,40 @@ impl RuntimeConfig {
                         "***".to_string()
                     }
                 })
-                .unwrap_or_else(|| "-".to_string());
-            println!("  provider:       {}", p.name);
-            println!("  base_url:       {}", p.base_url);
-            println!("  format:         {}", p.format);
-            println!("  vendor:         {}", p.vendor);
-            println!("  api_key:        {}", masked_key);
-            println!("  drop_images:    {}", p.drop_images);
+                .unwrap_or_else(|| "-".to_string())
         }
-        println!("default_provider: {}", self.default_provider);
-        println!("cors:             {}", self.cors);
-        println!("log_http:         {}", self.log_http);
-        println!("enable_reqlog:    {}", self.enable_reqlog);
+
+        let w = |label: &str, value: &dyn std::fmt::Display| {
+            println!("  {:<18} {}", label, value);
+        };
+
+        println!("── server ──");
+        w("addr:", &self.addr);
+        w("cors:", &self.cors);
+        w("reqlog:", &self.enable_reqlog);
+
+        for p in &self.providers {
+            println!("── {} ──", p.name);
+            w("base_url:", &p.base_url);
+            w("format:", &p.format);
+            w("vendor:", &p.vendor);
+            w("api_key:", &mask(&p.api_key));
+            w("drop_images:", &p.drop_images);
+        }
+
+        if !self.alias_map.is_empty() {
+            println!("── aliases ──");
+            for (alias, target) in self.alias_map.iter() {
+                if alias != "*" {
+                    println!(
+                        "  {:<18} {}/{}",
+                        format!("{} →", alias),
+                        target.provider,
+                        target.model
+                    );
+                }
+            }
+        }
     }
 }
 
