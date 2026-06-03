@@ -79,7 +79,6 @@ pub fn plan_output_contract(
 }
 
 /// Build a JSON schema instruction string to inject into the system prompt / instructions.
-#[allow(dead_code)]
 pub fn build_json_schema_instruction(format: &TextFormat) -> Option<String> {
     match format {
         TextFormat::JsonSchema {

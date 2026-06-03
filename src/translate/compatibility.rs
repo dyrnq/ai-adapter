@@ -11,7 +11,6 @@ pub enum DiagnosticSeverity {
 
 /// A single compatibility diagnostic message
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct CompatibilityDiagnostic {
     pub code: String,
     pub severity: DiagnosticSeverity,
@@ -85,7 +84,6 @@ impl Default for ProviderCapabilities {
 
 impl ProviderCapabilities {
     /// Plan request compatibility: detect unsupported features and plan degradation.
-    #[allow(dead_code)]
     pub fn plan_for_request(
         &self,
         has_tools: bool,
@@ -94,9 +92,8 @@ impl ProviderCapabilities {
         response_format: Option<&str>,
     ) -> CompatibilityPlan {
         let mut plan = CompatibilityPlan::default();
-        let provider_name = "unknown"; // caller should set this
+        let provider_name = "unknown";
 
-        // --- tool_choice ---
         let mut effective_tc = user_tool_choice.map(|s| s.to_string());
         if let Some(ref tc) = effective_tc {
             if !self.tool_choice.contains(tc.as_str()) {
@@ -121,7 +118,6 @@ impl ProviderCapabilities {
         }
         plan.effective_tool_choice = effective_tc;
 
-        // --- reasoning ---
         if user_reasoning && matches!(self.reasoning, ReasoningSupport::None) {
             plan.dropped_parameters.push("reasoning".into());
             plan.diagnostics.push(CompatibilityDiagnostic {
@@ -136,7 +132,6 @@ impl ProviderCapabilities {
             });
         }
 
-        // --- response_format ---
         if let Some(rf) = response_format {
             if !self.response_formats.contains(rf) {
                 plan.diagnostics.push(CompatibilityDiagnostic {
@@ -156,8 +151,49 @@ impl ProviderCapabilities {
     }
 }
 
+/// Get provider capabilities for a given vendor.
+pub fn capabilities_for(vendor: &crate::config::UpstreamVendor) -> ProviderCapabilities {
+    use crate::config::UpstreamVendor;
+    match vendor {
+        UpstreamVendor::DeepSeek => ProviderCapabilities {
+            reasoning: ReasoningSupport::Native,
+            ..ProviderCapabilities::default()
+        },
+        UpstreamVendor::XiaomiMimo => {
+            let mut caps = ProviderCapabilities {
+                reasoning: ReasoningSupport::None,
+                ..ProviderCapabilities::default()
+            };
+            caps.tool_choice = HashSet::from(["auto".into(), "none".into()]);
+            caps
+        }
+        UpstreamVendor::OpenAI | UpstreamVendor::Anthropic | UpstreamVendor::Auto => {
+            ProviderCapabilities::default()
+        }
+    }
+}
+
+/// Run compatibility diagnostics for a request and log findings.
+pub fn check_compatibility(
+    vendor: &crate::config::UpstreamVendor,
+    has_tools: bool,
+    user_tool_choice: Option<&str>,
+    user_reasoning: bool,
+    response_format: Option<&str>,
+) {
+    let caps = capabilities_for(vendor);
+    let plan = caps.plan_for_request(has_tools, user_tool_choice, user_reasoning, response_format);
+    if !plan.diagnostics.is_empty() {
+        tracing::info!(
+            "Compatibility diagnostics for {:?}: {:?}",
+            vendor,
+            plan.diagnostics.iter().map(|d| &d.code).collect::<Vec<_>>()
+        );
+        log_diagnostics(&plan.diagnostics);
+    }
+}
+
 /// Log diagnostics at appropriate level
-#[allow(dead_code)]
 pub fn log_diagnostics(diagnostics: &[CompatibilityDiagnostic]) {
     if diagnostics.is_empty() {
         return;
