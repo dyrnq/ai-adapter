@@ -7,6 +7,66 @@ use crate::types::responses::{
 use std::collections::HashMap;
 use uuid::Uuid;
 
+// ── Finish reason mapping ──────────────────────────────────────────────────
+
+/// Result of mapping a raw upstream finish_reason.
+struct FinishResult {
+    status: &'static str,
+    error: Option<serde_json::Value>,
+    incomplete_details: Option<serde_json::Value>,
+}
+
+/// Map raw upstream finish_reason to Responses API status, error, and
+/// incomplete_details. Covers all 11 states from GodeX mapProviderFinishReason.
+fn map_finish_reason(reason: &str) -> FinishResult {
+    match reason {
+        "stop" | "tool_calls" => FinishResult {
+            status: "completed",
+            error: None,
+            incomplete_details: None,
+        },
+        "length" | "model_context_window_exceeded" => FinishResult {
+            status: "incomplete",
+            error: None,
+            incomplete_details: Some(serde_json::json!({"reason": "max_output_tokens"})),
+        },
+        "content_filter" | "sensitive" => FinishResult {
+            status: "incomplete",
+            error: None,
+            incomplete_details: Some(serde_json::json!({"reason": "content_filter"})),
+        },
+        "network_error" => FinishResult {
+            status: "failed",
+            error: Some(serde_json::json!({
+                "code": "server_error",
+                "message": format!("Provider reported network_error finish reason: {}", reason),
+            })),
+            incomplete_details: None,
+        },
+        other => FinishResult {
+            status: "failed",
+            error: Some(serde_json::json!({
+                "code": "server_error",
+                "message": format!("Unexpected finish reason: {}", other),
+            })),
+            incomplete_details: None,
+        },
+    }
+}
+
+fn map_finish_reason_opt(reason: Option<&str>) -> FinishResult {
+    match reason {
+        None | Some("") => FinishResult {
+            status: "failed",
+            error: Some(serde_json::json!({
+                "code": "server_error",
+                "message": "Provider returned no finish reason",
+            })),
+            incomplete_details: None,
+        },
+        Some(r) => map_finish_reason(r),
+    }
+}
 /// Parsed SSE event
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -801,10 +861,13 @@ impl ChatStreamToResponsesTranslator {
                         if let Some(ref u) = self.usage {
                             resp.usage = Some(u.clone());
                         }
-                        if fr == "length" {
-                            resp.status = Some("incomplete".to_string());
-                            resp.incomplete_details =
-                                Some(serde_json::json!({"reason": "max_output_tokens"}));
+                        let finish = map_finish_reason(fr);
+                        resp.status = Some(finish.status.to_string());
+                        if let Some(ref details) = finish.incomplete_details {
+                            resp.incomplete_details = Some(details.clone());
+                        }
+                        if let Some(ref err) = finish.error {
+                            resp.error = Some(err.clone());
                         }
                         events.push(ResponsesStreamEvent::ResponseCompleted {
                             response: resp,
@@ -953,7 +1016,10 @@ impl ChatStreamToResponsesTranslator {
         if let Some(ref u) = self.usage {
             resp.usage = Some(u.clone());
         }
-        resp.status = Some("completed".to_string());
+        let finish = map_finish_reason_opt(self.finish_reason.as_deref());
+        resp.status = Some(finish.status.to_string());
+        resp.error = finish.error;
+        resp.incomplete_details = finish.incomplete_details;
         events.push(ResponsesStreamEvent::ResponseCompleted {
             response: resp,
             sequence_number: self.next_seq(),
