@@ -135,22 +135,41 @@ pub fn convert_responses_to_chat(
             .collect()
     });
 
-    // -- response_format from text.format ----------------------------------------------
+    // -- response_format from text.format — degrade json_schema to json_object
+    //    if DeepSeek Chat doesn't support json_schema natively.
+    //    For strict json_schema, inject the schema into the system prompt.
+    let mut output_contract = None;
     let response_format = responses.text.as_ref().and_then(|tc| {
-        tc.format.as_ref().map(|f| match f {
-            TextFormat::Text => ResponseFormat::Text,
-            TextFormat::JsonObject => ResponseFormat::JsonObject,
-            TextFormat::JsonSchema {
-                name,
-                schema,
-                strict,
-            } => ResponseFormat::JsonSchema {
-                json_schema: JsonSchemaDef {
-                    name: name.clone(),
-                    schema: schema.clone(),
-                    strict: *strict,
-                },
-            },
+        tc.format.as_ref().map(|f| {
+            match f {
+                TextFormat::Text => ResponseFormat::Text,
+                TextFormat::JsonObject => ResponseFormat::JsonObject,
+                TextFormat::JsonSchema { .. } => {
+                    // DeepSeek Chat doesn't support json_schema; degrade to json_object
+                    let contract = crate::translate::output_contract::plan_output_contract(
+                        Some(f),
+                        false, // supports_json_schema = false for DeepSeek Chat
+                    );
+                    if contract.inject_schema_instruction {
+                        if let Some(instr) =
+                            crate::translate::output_contract::build_json_schema_instruction(f)
+                        {
+                            // Inject schema instruction into messages (as a system message)
+                            messages.push(ChatMessage {
+                                role: "system".to_string(),
+                                content: Some(ChatContent::String(instr)),
+                                name: None,
+                                reasoning_content: None,
+                                refusal: None,
+                                tool_calls: None,
+                                tool_call_id: None,
+                            });
+                        }
+                    }
+                    output_contract = Some(contract);
+                    ResponseFormat::JsonObject
+                }
+            }
         })
     });
 
@@ -223,27 +242,21 @@ pub fn convert_chat_to_responses_response(
                 }
                 "length" => {
                     status = "incomplete";
-                    incomplete_details =
-                        Some(serde_json::json!({"reason": "max_output_tokens"}));
+                    incomplete_details = Some(serde_json::json!({"reason": "max_output_tokens"}));
                 }
                 "content_filter" | "sensitive" => {
                     status = "incomplete";
-                    incomplete_details =
-                        Some(serde_json::json!({"reason": "content_filter"}));
+                    incomplete_details = Some(serde_json::json!({"reason": "content_filter"}));
                 }
                 "model_context_window_exceeded" => {
                     status = "incomplete";
-                    incomplete_details =
-                        Some(serde_json::json!({"reason": "max_output_tokens"}));
+                    incomplete_details = Some(serde_json::json!({"reason": "max_output_tokens"}));
                 }
                 "network_error" => {
                     status = "failed";
                 }
                 _ => {
-                    tracing::warn!(
-                        "Unknown finish_reason: {:?}, treating as completed",
-                        finish
-                    );
+                    tracing::warn!("Unknown finish_reason: {:?}, treating as completed", finish);
                 }
             }
         }
