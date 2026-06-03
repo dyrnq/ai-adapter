@@ -541,6 +541,31 @@ impl RuntimeConfig {
         }
         self.providers.first()
     }
+
+    /// Resolve model name to (provider, upstream_model_name) in one lookup.
+    /// Falls back to first provider and raw model name if no match.
+    pub fn resolve_model_and_provider(&self, model: &str) -> (String, &ResolvedProvider) {
+        // Direct "provider/model" reference
+        if let Some((provider_name, upstream_model)) = model.split_once('/') {
+            let provider = self
+                .providers
+                .iter()
+                .find(|p| p.name == provider_name)
+                .unwrap_or_else(|| &self.providers[0]);
+            return (upstream_model.to_string(), provider);
+        }
+        // Alias lookup
+        if let Some(target) = self.alias_map.resolve(model) {
+            let provider = self
+                .providers
+                .iter()
+                .find(|p| p.name == target.provider)
+                .unwrap_or_else(|| &self.providers[0]);
+            return (target.model.clone(), provider);
+        }
+        // Fallback: use model as-is, first provider
+        (model.to_string(), &self.providers[0])
+    }
 }
 
 // Legacy accessors for RuntimeConfig to minimize server.rs changes
@@ -582,6 +607,7 @@ impl RuntimeConfig {
     /// "gpt-5.5" -> alias lookup -> "deepseek-v4-pro"
     /// "deepseek/deepseek-v4-pro" -> "deepseek-v4-pro"
     /// "" or None -> empty string
+    #[allow(dead_code)]
     pub fn resolve_upstream_model(&self, model: Option<&str>) -> String {
         let model = match model {
             Some(m) if !m.is_empty() => m,

@@ -19,7 +19,7 @@ use tower_http::{
 };
 use tracing::Level;
 
-use crate::config::{RuntimeConfig, UpstreamFormat};
+use crate::config::{ResolvedProvider, RuntimeConfig, UpstreamFormat};
 use crate::error::AdapterError;
 use crate::state::{ReasoningCache, SessionStore};
 use crate::stream::sse::{
@@ -216,26 +216,28 @@ async fn handle_compact(
         }
     };
 
+    let client_bearer = extract_bearer(&headers);
+    let (_upstream_model, provider) = {
+        let model = compact_req.model.as_deref().unwrap_or("gpt-4o");
+        state.config.resolve_model_and_provider(model)
+    };
+
     let api_key: Option<String> = if state.config.prefer_client_key {
-        extract_bearer(&headers).or_else(|| state.config.api_key().map(|s| s.to_string()))
+        client_bearer.or_else(|| provider.api_key.clone())
     } else {
-        state
-            .config
-            .api_key()
-            .map(|s| s.to_string())
-            .or_else(|| extract_bearer(&headers))
+        provider.api_key.clone().or(client_bearer)
     };
 
     // Build a summarization prompt from the conversation history
     let conversation_text = build_compact_prompt(&compact_req);
 
     // Determine how to call the upstream based on format
-    let result = match state.config.upstream_format() {
+    let result = match provider.format {
         crate::config::UpstreamFormat::Anthropic => {
-            compact_via_anthropic(&state, &compact_req, &conversation_text, api_key).await
+            compact_via_anthropic(&state, provider, &compact_req, &conversation_text, api_key).await
         }
         crate::config::UpstreamFormat::OpenAiChat | crate::config::UpstreamFormat::Responses => {
-            compact_via_chat(&state, &compact_req, &conversation_text, api_key).await
+            compact_via_chat(&state, provider, &compact_req, &conversation_text, api_key).await
         }
     };
 
@@ -282,6 +284,7 @@ fn build_compact_prompt(req: &CompactRequest) -> String {
 
 async fn compact_via_chat(
     state: &AppState,
+    provider: &ResolvedProvider,
     req: &CompactRequest,
     prompt: &str,
     api_key: Option<String>,
@@ -301,7 +304,7 @@ async fn compact_via_chat(
         "temperature": 0.3,
     });
 
-    let upstream_url = build_upstream_url(state.config.base_url(), "/v1/chat/completions");
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -378,6 +381,7 @@ async fn compact_via_chat(
 
 async fn compact_via_anthropic(
     state: &AppState,
+    provider: &ResolvedProvider,
     req: &CompactRequest,
     prompt: &str,
     api_key: Option<String>,
@@ -409,7 +413,7 @@ async fn compact_via_anthropic(
 
     let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
 
-    let upstream_url = build_upstream_url(state.config.base_url(), "/v1/messages");
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -421,7 +425,7 @@ async fn compact_via_anthropic(
         HeaderValue::from_static("2023-06-01"),
     );
     if let Some(ref key) = api_key {
-        match state.config.vendor() {
+        match provider.vendor {
             crate::config::UpstreamVendor::XiaomiMimo => {
                 if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
                     upstream_headers.insert(HeaderName::from_static("authorization"), val);
@@ -536,15 +540,19 @@ async fn handle_chat_completions(
     };
 
     let is_stream = chat_req.stream.unwrap_or(false);
+
+    // Resolve model → provider + upstream model in one lookup
+    let client_bearer = extract_bearer(&headers);
+    let (upstream_model, provider) = state.config.resolve_model_and_provider(&chat_req.model);
+
     let api_key: Option<String> = if state.config.prefer_client_key {
-        extract_bearer(&headers).or_else(|| state.config.api_key().map(|s| s.to_string()))
+        client_bearer.or_else(|| provider.api_key.clone())
     } else {
-        state
-            .config
-            .api_key()
-            .map(|s| s.to_string())
-            .or_else(|| extract_bearer(&headers))
+        provider.api_key.clone().or(client_bearer)
     };
+
+    let mut chat_req = chat_req;
+    chat_req.model = upstream_model;
 
     // Compatibility diagnostics
     if !is_stream {
@@ -555,7 +563,7 @@ async fn handle_chat_completions(
             crate::types::chat::ResponseFormat::JsonSchema { .. } => "json_schema",
         });
         check_compatibility(
-            state.config.vendor(),
+            &provider.vendor,
             has_tools,
             chat_req.tool_choice.as_ref().and_then(|v| v.as_str()),
             chat_req.reasoning_effort.is_some(),
@@ -563,24 +571,11 @@ async fn handle_chat_completions(
         );
     }
 
-    // Resolve model alias to upstream model name
-    // "gpt-5.5" -> "deepseek-v4-pro", "deepseek/deepseek-v4-pro" -> "deepseek-v4-pro"
-    let upstream_model = state
-        .config
-        .resolve_upstream_model(Some(chat_req.model.as_str()));
-    let chat_req = if !upstream_model.is_empty() && chat_req.model != upstream_model {
-        let mut r = chat_req.clone();
-        r.model = upstream_model.clone();
-        r
-    } else {
-        chat_req
-    };
-
-    // Route based on upstream format
-    match state.config.upstream_format() {
+    // Route based on provider format
+    match provider.format {
         UpstreamFormat::OpenAiChat => {
             // Chat -> Chat passthrough: send directly to upstream /v1/chat/completions
-            return handle_chat_passthrough(&state, &chat_req, is_stream, api_key).await;
+            return handle_chat_passthrough(&state, provider, &chat_req, is_stream, api_key).await;
         }
         UpstreamFormat::Responses => {
             // Chat -> Responses: convert and send to upstream /v1/responses
@@ -588,7 +583,8 @@ async fn handle_chat_completions(
         }
         UpstreamFormat::Anthropic => {
             // Chat -> Anthropic: convert and send to upstream /v1/messages
-            return handle_chat_via_anthropic(&state, &chat_req, is_stream, api_key).await;
+            return handle_chat_via_anthropic(&state, provider, &chat_req, is_stream, api_key)
+                .await;
         }
     }
 
@@ -596,7 +592,7 @@ async fn handle_chat_completions(
     let responses_req = convert_chat_to_responses(&chat_req);
 
     // Determine upstream URL
-    let upstream_url = build_upstream_url(state.config.base_url(), "/v1/responses");
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/responses");
     // Build upstream request
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -775,11 +771,12 @@ async fn handle_chat_completions(
 // ── handle_chat_passthrough: ChatCompletions -> upstream /v1/chat/completions ──
 async fn handle_chat_passthrough(
     state: &AppState,
+    provider: &ResolvedProvider,
     req: &ChatCompletionsRequest,
     is_stream: bool,
     api_key: Option<String>,
 ) -> Response {
-    let upstream_url = build_upstream_url(state.config.base_url(), "/v1/chat/completions");
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -891,6 +888,7 @@ async fn handle_chat_passthrough(
 // ── handle_chat_via_anthropic: ChatCompletions -> upstream /v1/messages ──
 async fn handle_chat_via_anthropic(
     state: &AppState,
+    provider: &ResolvedProvider,
     req: &ChatCompletionsRequest,
     is_stream: bool,
     api_key: Option<String>,
@@ -899,7 +897,7 @@ async fn handle_chat_via_anthropic(
     let responses_req = convert_chat_to_responses(req);
     let anthropic_req = convert_responses_to_anthropic(&responses_req);
 
-    let upstream_url = build_upstream_url(state.config.base_url(), "/v1/messages");
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -911,7 +909,7 @@ async fn handle_chat_via_anthropic(
         HeaderValue::from_static("2023-06-01"),
     );
     if let Some(ref key) = api_key {
-        match state.config.vendor() {
+        match provider.vendor {
             crate::config::UpstreamVendor::XiaomiMimo => {
                 if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
                     upstream_headers.insert(HeaderName::from_static("authorization"), val);
@@ -1050,14 +1048,17 @@ async fn handle_responses(
 
     let is_stream = responses_req.stream.unwrap_or(false);
     tracing::debug!("handle_responses: stream={}, body={}", is_stream, &body);
+
+    // Resolve model → provider
+    let client_bearer = extract_bearer(&headers);
+    let (upstream_model, provider) = state
+        .config
+        .resolve_model_and_provider(&responses_req.model);
+
     let api_key = if state.config.prefer_client_key {
-        extract_bearer(&headers).or_else(|| state.config.api_key().map(|s| s.to_string()))
+        client_bearer.or_else(|| provider.api_key.clone())
     } else {
-        state
-            .config
-            .api_key()
-            .map(|s| s.to_string())
-            .or_else(|| extract_bearer(&headers))
+        provider.api_key.clone().or(client_bearer)
     };
 
     // Filter images if --drop-images is set (text-only upstreams)
@@ -1090,12 +1091,7 @@ async fn handle_responses(
         responses_req
     };
 
-    // Resolve model alias to upstream model name
-    // "gpt-5.5" -> "deepseek-v4-pro", "deepseek/deepseek-v4-pro" -> "deepseek-v4-pro"
-    let upstream_model = state
-        .config
-        .resolve_upstream_model(Some(responses_req.model.as_str()));
-    let responses_req = if !upstream_model.is_empty() && responses_req.model != upstream_model {
+    let responses_req = if upstream_model != responses_req.model {
         let mut r = responses_req.clone();
         r.model = upstream_model.clone();
         r
@@ -1104,10 +1100,11 @@ async fn handle_responses(
     };
 
     // Route based on upstream format
-    match state.config.upstream_format() {
+    match provider.format {
         UpstreamFormat::Anthropic => {
             return handle_responses_via_anthropic(
                 &state,
+                provider,
                 &responses_req,
                 is_stream,
                 api_key,
@@ -1118,6 +1115,7 @@ async fn handle_responses(
         UpstreamFormat::OpenAiChat => {
             return handle_responses_via_chat(
                 &state,
+                provider,
                 &responses_req,
                 is_stream,
                 api_key,
@@ -1130,7 +1128,7 @@ async fn handle_responses(
         }
     }
 
-    let upstream_url = build_upstream_url(state.config.base_url(), "/v1/responses");
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/responses");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1187,6 +1185,7 @@ async fn handle_responses(
 
 async fn handle_responses_via_chat(
     state: &AppState,
+    provider: &ResolvedProvider,
     req: &ResponsesRequest,
     is_stream: bool,
     api_key: Option<String>,
@@ -1253,14 +1252,14 @@ async fn handle_responses_via_chat(
         req.clone()
     };
 
-    let chat_req = match state.config.vendor() {
+    let chat_req = match provider.vendor {
         crate::config::UpstreamVendor::XiaomiMimo => {
             crate::translate::xiaomimimo::chat::convert_responses_to_chat(&req, previous_reasoning)
         }
         _ => convert_for_deepseek(&req, previous_reasoning),
     };
 
-    let upstream_url = build_upstream_url(state.config.base_url(), "/v1/chat/completions");
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1327,10 +1326,7 @@ async fn handle_responses_via_chat(
         let reason_cache = state.reason_cache.clone();
         let response_id = format!("resp_{}", uuid::Uuid::new_v4());
         let session_id_for_save = session_id.clone();
-        let is_xiaomimimo = matches!(
-            state.config.vendor(),
-            crate::config::UpstreamVendor::XiaomiMimo
-        );
+        let is_xiaomimimo = matches!(provider.vendor, crate::config::UpstreamVendor::XiaomiMimo);
         tokio::spawn(async move {
             let mut translator = ChatStreamToResponsesTranslator::new(&model);
             translator.response_id = response_id.clone();
@@ -1440,10 +1436,7 @@ async fn handle_responses_via_chat(
         let mut responses_resp = convert_chat_to_responses_response(&chat_resp, &upstream_model);
 
         // Strip xiaomimimo reasoning markers from output text
-        if matches!(
-            state.config.vendor(),
-            crate::config::UpstreamVendor::XiaomiMimo
-        ) {
+        if matches!(provider.vendor, crate::config::UpstreamVendor::XiaomiMimo) {
             for item in &mut responses_resp.output {
                 if let ResponsesOutputItem::Message { content, .. } = item {
                     for part in content {
@@ -1484,6 +1477,7 @@ async fn handle_responses_via_chat(
 
 async fn handle_responses_via_anthropic(
     state: &AppState,
+    provider: &ResolvedProvider,
     req: &ResponsesRequest,
     is_stream: bool,
     api_key: Option<String>,
@@ -1511,9 +1505,9 @@ async fn handle_responses_via_anthropic(
         None
     };
 
-    let anthropic_req = convert_responses_to_anthropic_for(req, state.config.vendor());
+    let anthropic_req = convert_responses_to_anthropic_for(req, &provider.vendor);
 
-    let upstream_url = build_upstream_url(state.config.base_url(), "/v1/messages");
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1525,7 +1519,7 @@ async fn handle_responses_via_anthropic(
         HeaderValue::from_static("2023-06-01"),
     );
     if let Some(ref key) = api_key {
-        match state.config.vendor() {
+        match provider.vendor {
             crate::config::UpstreamVendor::XiaomiMimo => {
                 if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
                     upstream_headers.insert(HeaderName::from_static("authorization"), val);
@@ -1589,10 +1583,7 @@ async fn handle_responses_via_anthropic(
         let reason_cache = state.reason_cache.clone();
         let response_id = format!("resp_{}", uuid::Uuid::new_v4());
         let session_id_for_save = session_id.clone();
-        let _is_xiaomimimo = matches!(
-            state.config.vendor(),
-            crate::config::UpstreamVendor::XiaomiMimo
-        );
+        let _is_xiaomimimo = matches!(provider.vendor, crate::config::UpstreamVendor::XiaomiMimo);
         tokio::spawn(async move {
             let mut translator = AnthropicStreamTranslator::new(&model);
             translator.response_id = response_id.clone();
