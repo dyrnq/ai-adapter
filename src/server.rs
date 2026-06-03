@@ -98,7 +98,7 @@ pub fn build_router(
         .route("/v1/chat/completions", post(handle_chat_completions))
         .route("/v1/responses", post(handle_responses))
         .route("/v1/responses/compact", post(handle_compact))
-        .route("/v1/models", get(handle_passthrough))
+        .route("/v1/models", get(handle_models_v1))
         .route("/health", get(handle_health))
         .route("/__/models", get(handle_models))
         .route("/__/session", get(handle_session_list))
@@ -161,6 +161,27 @@ async fn handle_models(State(state): State<AppState>) -> impl IntoResponse {
                 "object": "model",
                 "owned_by": target.provider,
                 "upstream_model": target.model,
+            })
+        })
+        .collect();
+    axum::Json(serde_json::json!({
+        "object": "list",
+        "data": models,
+    }))
+}
+
+async fn handle_models_v1(State(state): State<AppState>) -> impl IntoResponse {
+    let models: Vec<serde_json::Value> = state
+        .config
+        .alias_map
+        .iter()
+        .filter(|(alias, _)| *alias != "*")
+        .map(|(alias, target)| {
+            serde_json::json!({
+                "id": alias,
+                "object": "model",
+                "created": 1700000000_i64,
+                "owned_by": target.provider,
             })
         })
         .collect();
@@ -1742,6 +1763,7 @@ async fn handle_passthrough_post(
     passthrough_request(&state, &headers, Method::POST, &uri, Some(&body)).await
 }
 
+#[allow(dead_code)]
 async fn handle_passthrough(
     State(state): State<AppState>,
     headers: HeaderMap,
