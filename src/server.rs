@@ -175,12 +175,12 @@ async fn handle_models_v1(State(state): State<AppState>) -> impl IntoResponse {
         .alias_map
         .iter()
         .filter(|(alias, _)| *alias != "*")
-        .map(|(alias, target)| {
+        .map(|(alias, _)| {
             serde_json::json!({
                 "id": alias,
                 "object": "model",
                 "created": 1700000000_i64,
-                "owned_by": target.provider,
+                "owned_by": "openai",
             })
         })
         .collect();
