@@ -105,6 +105,11 @@ enum Commands {
         #[command(subcommand)]
         action: SessionAction,
     },
+    /// Cache and usage statistics
+    Stats {
+        #[command(subcommand)]
+        action: StatsCommands,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -114,6 +119,23 @@ enum SessionAction {
         /// Adapter endpoint (default: http://127.0.0.1:9090)
         #[arg(long, default_value = "http://127.0.0.1:9090")]
         endpoint: String,
+    },
+}
+
+/// Cache analysis and usage statistics
+#[derive(clap::Subcommand, Debug)]
+enum StatsCommands {
+    /// Show cache hit/miss analysis from reqlog
+    Cache {
+        /// Path to SQLite database (default: AI_ADAPTER_DB env or ~/.ai-adapter/adapter.db)
+        #[arg(long)]
+        db: Option<String>,
+        /// Model filter (e.g. deepseek-v4-pro)
+        #[arg(long)]
+        model: Option<String>,
+        /// Show per-day breakdown
+        #[arg(long, default_value_t = false)]
+        daily: bool,
     },
 }
 
@@ -135,6 +157,14 @@ async fn main() -> anyhow::Result<()> {
                 match action {
                     SessionAction::Ls { endpoint } => {
                         commands::session::run(endpoint, "ls").await?;
+                    }
+                }
+                return Ok(());
+            }
+            Commands::Stats { action } => {
+                match action {
+                    StatsCommands::Cache { db, model, daily } => {
+                        commands::stats::run_cache(db.clone(), model.clone(), *daily).await?;
                     }
                 }
                 return Ok(());
