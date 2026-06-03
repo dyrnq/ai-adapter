@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod error;
 mod server;
 mod state;
 mod stream;
@@ -32,6 +33,14 @@ struct Cli {
     /// Prefer client-supplied API key (Authorization header) over config key
     #[arg(long = "prefer-client-key")]
     prefer_client_key: bool,
+
+    /// Model aliases: alias=provider/model (repeatable, e.g. --model-alias gpt-5.5=deepseek/deepseek-v4-pro)
+    #[arg(long = "model-alias")]
+    model_alias: Vec<String>,
+
+    /// Enable request logging to SQLite (requires AI_ADAPTER_DB)
+    #[arg(long = "reqlog")]
+    reqlog: bool,
 
     /// Default model to use
     #[arg(long = "model")]
@@ -227,6 +236,8 @@ async fn main() -> anyhow::Result<()> {
         cli.vendor.as_deref(),
         cli.access_log_dir.as_deref(),
         cli.prefer_client_key,
+        &cli.model_alias,
+        cli.reqlog,
     )?;
 
     config.print();
@@ -242,19 +253,12 @@ async fn main() -> anyhow::Result<()> {
         });
     std::fs::create_dir_all(&data_dir)?;
     std::fs::create_dir_all(data_dir.join("logs"))?;
-    let cache_path = data_dir.join("state.redb");
-    let db = std::sync::Arc::new(tokio::sync::RwLock::new(redb::Database::create(
-        &cache_path,
-    )?));
-    // Ensure tables exist
-    {
-        let write_txn = db.read().await.begin_write()?;
-        let _ = write_txn.open_table(redb::TableDefinition::<&str, &str>::new("reasoning"));
-        let _ = write_txn.open_table(redb::TableDefinition::<&str, &str>::new("session"));
-        write_txn.commit()?;
-    }
-    let reason_cache = state::ReasoningCache::new(db.clone());
-    let session_store = state::SessionStore::new(db.clone());
+
+    // Detect state store: SQLite if AI_ADAPTER_DB is set, otherwise redb.
+    // SqliteStore auto-migrates data from state.redb if it exists.
+    let store = state::store::detect_store();
+    let reason_cache = state::ReasoningCache::new(store.clone());
+    let session_store = state::SessionStore::new(store.clone());
     let router = server::build_router(
         config.clone(),
         reason_cache,

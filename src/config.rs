@@ -24,6 +24,18 @@ pub enum UpstreamVendor {
     Auto,
 }
 
+impl std::fmt::Display for UpstreamVendor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpstreamVendor::DeepSeek => write!(f, "deepseek"),
+            UpstreamVendor::OpenAI => write!(f, "openai"),
+            UpstreamVendor::Anthropic => write!(f, "anthropic"),
+            UpstreamVendor::XiaomiMimo => write!(f, "xiaomimimo"),
+            UpstreamVendor::Auto => write!(f, "auto"),
+        }
+    }
+}
+
 #[allow(dead_code)]
 impl UpstreamVendor {
     pub fn resolve(&self, base_url: &str) -> UpstreamVendor {
@@ -65,78 +77,159 @@ impl UpstreamFormat {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Provider configuration — multi-provider support
+// ---------------------------------------------------------------------------
+
+/// A single upstream provider entry in the YAML config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    /// Provider name identifier (used in model aliases: provider/model)
+    pub name: String,
+    /// Upstream base URL
+    #[serde(rename = "baseUrl")]
+    pub base_url: String,
+    /// Upstream API format
+    pub format: String,
+    /// API key
+    pub apikey: Option<String>,
+    /// Optional list of model names this provider serves
+    #[serde(default)]
+    pub models: Vec<String>,
+    /// Provider-specific adapter behavior hint
+    pub vendor: Option<String>,
+    /// Extra headers to add to upstream requests
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    /// Drop images from requests (for text-only upstreams)
+    #[serde(rename = "dropImages", default)]
+    pub drop_images: bool,
+}
+
 /// Main config structure (YAML/JSON config file)
-/// Fields mirror CLI options; use camelCase for JSON, snake_case for YAML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub server: Option<ServerConfig>,
+    /// List of upstream providers
+    #[serde(default)]
+    pub providers: Vec<ProviderConfig>,
+    /// Model alias map: alias -> provider/model
+    #[serde(rename = "modelAliases", default)]
+    pub model_aliases: HashMap<String, String>,
+    /// Global fallback base URL (legacy, overridden by providers)
     #[serde(rename = "baseUrl")]
     pub base_url: Option<String>,
+    /// Global format (legacy)
     pub format: Option<String>,
+    /// Global API key (legacy)
     pub apikey: Option<String>,
+    /// Global model (legacy)
     pub model: Option<String>,
     #[serde(rename = "dropImages")]
     pub drop_images: Option<bool>,
     pub vendor: Option<String>,
-    pub headers: Option<HashMap<String, String>>,
+    /// Global extra headers
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    /// Enable request logging to SQLite
+    #[serde(default)]
+    pub reqlog: bool,
+    /// Access log directory
+    #[serde(rename = "accessLogDir")]
+    pub access_log_dir: Option<String>,
+    /// Log HTTP bodies
+    #[serde(rename = "logHttp", default)]
+    pub log_http: bool,
+    /// Disable CORS
+    #[serde(rename = "noCors", default)]
+    pub no_cors: bool,
+    /// Prefer client-supplied API key
+    #[serde(rename = "preferClientKey", default)]
+    pub prefer_client_key: bool,
+    /// Truncate reasoning to 32KB
+    #[serde(rename = "truncateReasoning", default)]
+    pub truncate_reasoning: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     #[serde(default = "default_addr")]
     pub addr: String,
+    /// Access log directory (optional, overrides global)
+    #[serde(rename = "accessLogDir")]
+    pub access_log_dir: Option<String>,
+    /// Log HTTP body
+    #[serde(rename = "logHttp", default)]
+    pub log_http: bool,
+    /// Disable CORS
+    #[serde(rename = "noCors", default)]
+    pub no_cors: bool,
+    /// Prefer client-supplied API key
+    #[serde(rename = "preferClientKey", default)]
+    pub prefer_client_key: bool,
+    /// Truncate reasoning to 32KB
+    #[serde(rename = "truncateReasoning", default)]
+    pub truncate_reasoning: bool,
+    /// Enable request logging to SQLite
+    #[serde(default)]
+    pub reqlog: bool,
+    /// Drop images from requests
+    #[serde(rename = "dropImages", default)]
+    pub drop_images: bool,
 }
 
 fn default_addr() -> String {
     "0.0.0.0:9090".to_string()
 }
 
-#[derive(Debug, Clone)]
-pub struct RuntimeConfig {
-    pub addr: String,
-    pub base_url: String,
-    pub upstream_format: UpstreamFormat,
-    pub api_key: Option<String>,
-    pub prefer_client_key: bool,
-    pub model: Option<String>,
-    pub api_version: Option<String>,
-    pub drop_images: bool,
-    pub backfill_reasoning: bool,
-    pub truncate_reasoning: bool,
-    pub cors: bool,
-    pub log_http: bool,
-    pub access_log_dir: Option<String>,
-    pub extra_headers: HashMap<String, String>,
-    pub vendor: UpstreamVendor,
-}
+// ---------------------------------------------------------------------------
+// Runtime config (resolved from AppConfig + CLI + env)
+// ---------------------------------------------------------------------------
 
+/// Resolved provider entry used at runtime
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct FallbackUpstream {
+pub struct ResolvedProvider {
+    pub name: String,
     pub base_url: String,
     pub format: UpstreamFormat,
     pub api_key: Option<String>,
-    pub model: Option<String>,
+    pub vendor: UpstreamVendor,
+    pub drop_images: bool,
+    pub extra_headers: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    pub addr: String,
+    pub cors: bool,
+    pub log_http: bool,
+    pub access_log_dir: Option<String>,
+    pub enable_reqlog: bool,
+    pub prefer_client_key: bool,
+    pub truncate_reasoning: bool,
+    pub drop_images: bool,
+    /// Resolved alias map: alias -> (provider_name, upstream_model)
+    pub alias_map: crate::translate::aliases::ModelAliasMap,
+    /// All configured providers
+    pub providers: Vec<ResolvedProvider>,
+    /// Default provider name (first provider, or "default")
+    pub default_provider: String,
 }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             addr: "0.0.0.0:9090".to_string(),
-            base_url: "https://api.openai.com".to_string(),
-            upstream_format: UpstreamFormat::OpenAiChat,
-            api_key: None,
-            prefer_client_key: false,
-            model: None,
-            api_version: None,
-            drop_images: false,
-            backfill_reasoning: false,
-            truncate_reasoning: false,
             cors: true,
             log_http: false,
             access_log_dir: None,
-            extra_headers: HashMap::new(),
-            vendor: UpstreamVendor::Auto,
+            enable_reqlog: false,
+            prefer_client_key: false,
+            truncate_reasoning: false,
+            drop_images: false,
+            alias_map: crate::translate::aliases::ModelAliasMap::new(),
+            providers: Vec::new(),
+            default_provider: "default".to_string(),
         }
     }
 }
@@ -144,57 +237,53 @@ impl Default for RuntimeConfig {
 impl RuntimeConfig {
     /// Pretty-print the resolved config (masks api_key)
     pub fn print(&self) {
-        let masked_key = self
-            .api_key
-            .as_deref()
-            .map(|k| {
-                if k.len() > 8 {
-                    format!("{}****{}", &k[..4], &k[k.len() - 4..])
-                } else {
-                    "****".to_string()
-                }
-            })
-            .unwrap_or_else(|| "-".to_string());
-
         println!("addr:             {}", self.addr);
-        println!("base_url:         {}", self.base_url);
-        println!("upstream_format:  {}", self.upstream_format);
-        println!("vendor:           {:?}", self.vendor);
-        println!("model:            {}", self.model.as_deref().unwrap_or("-"));
-        println!(
-            "api_version:      {}",
-            self.api_version.as_deref().unwrap_or("-")
-        );
-        println!("api_key:          {}", masked_key);
-        println!("drop_images:      {}", self.drop_images);
-        println!("backfill_reason:  {}", self.backfill_reasoning);
-        println!("truncate_reasoning:   {}", self.truncate_reasoning);
+        for p in &self.providers {
+            let masked_key = p
+                .api_key
+                .as_deref()
+                .map(|k| {
+                    if k.len() > 8 {
+                        format!("{}****{}", &k[..4], &k[k.len() - 4..])
+                    } else {
+                        "***".to_string()
+                    }
+                })
+                .unwrap_or_else(|| "-".to_string());
+            println!("  provider:       {}", p.name);
+            println!("  base_url:       {}", p.base_url);
+            println!("  format:         {}", p.format);
+            println!("  vendor:         {}", p.vendor);
+            println!("  api_key:        {}", masked_key);
+            println!("  drop_images:    {}", p.drop_images);
+        }
+        println!("default_provider: {}", self.default_provider);
         println!("cors:             {}", self.cors);
         println!("log_http:         {}", self.log_http);
-        if let Some(ref d) = self.access_log_dir {
-            println!("access_log_dir:   {}", d);
-        }
-        if !self.extra_headers.is_empty() {
-            println!("extra_headers:    {} entries", self.extra_headers.len());
-        }
+        println!("enable_reqlog:    {}", self.enable_reqlog);
     }
 }
 
-/// Load config from file, env vars, and CLI overrides
+// ---------------------------------------------------------------------------
+// Config loading
+// ---------------------------------------------------------------------------
+
 #[allow(clippy::too_many_arguments)]
 pub fn load_config(
     config_path: Option<&PathBuf>,
     cli_base_url: Option<&str>,
     cli_format: Option<&str>,
     cli_api_key: Option<&str>,
-    cli_model: Option<&str>,
-    cli_addr: Option<&str>,
+    _cli_model: Option<&str>,
+    _cli_addr: Option<&str>,
     cli_drop_images: bool,
     cli_no_cors: bool,
     cli_log_http: bool,
     cli_vendor: Option<&str>,
     cli_access_log_dir: Option<&str>,
     cli_prefer_client_key: bool,
+    cli_model_alias: &[String],
+    cli_enable_reqlog: bool,
 ) -> anyhow::Result<RuntimeConfig> {
     let mut config = RuntimeConfig::default();
 
@@ -207,92 +296,171 @@ pub fn load_config(
         // Apply server config
         if let Some(server) = &app_config.server {
             config.addr = server.addr.clone();
-        }
-
-        // Apply flat upstream config (mirrors CLI)
-        if let Some(ref url) = app_config.base_url {
-            config.base_url = url.clone();
-        }
-        if let Some(ref fmt) = app_config.format {
-            if let Some(f) = UpstreamFormat::from_str(fmt) {
-                config.upstream_format = f;
+            if let Some(d) = &server.access_log_dir {
+                config.access_log_dir = Some(d.clone());
+            }
+            config.log_http = server.log_http || app_config.log_http;
+            if server.no_cors {
+                config.cors = false;
+            }
+            if app_config.no_cors {
+                config.cors = false;
+            }
+            config.prefer_client_key = server.prefer_client_key || app_config.prefer_client_key;
+            config.truncate_reasoning = server.truncate_reasoning || app_config.truncate_reasoning;
+            config.enable_reqlog = server.reqlog || app_config.reqlog;
+            config.drop_images = server.drop_images || app_config.drop_images.unwrap_or(false);
+        } else {
+            config.log_http = app_config.log_http;
+            if app_config.no_cors {
+                config.cors = false;
+            }
+            config.prefer_client_key = app_config.prefer_client_key;
+            config.truncate_reasoning = app_config.truncate_reasoning;
+            config.enable_reqlog = app_config.reqlog;
+            if let Some(d) = app_config.drop_images {
+                config.drop_images = d;
             }
         }
-        if let Some(ref key) = app_config.apikey {
-            config.api_key = Some(key.clone());
-        }
-        if let Some(ref model) = app_config.model {
-            config.model = Some(model.clone());
-        }
-        if let Some(d) = app_config.drop_images {
-            config.drop_images = d;
-        }
-        if let Some(ref v) = app_config.vendor {
-            config.vendor = match v.as_str() {
-                "deepseek" => UpstreamVendor::DeepSeek,
-                "openai" => UpstreamVendor::OpenAI,
-                "anthropic" => UpstreamVendor::Anthropic,
-                "xiaomimimo" => UpstreamVendor::XiaomiMimo,
-                "auto" => UpstreamVendor::Auto,
-                _ => UpstreamVendor::Auto,
-            };
+
+        // Apply access_log_dir from AppConfig top-level fallback
+        if let Some(d) = &app_config.access_log_dir {
+            if config.access_log_dir.is_none() {
+                config.access_log_dir = Some(d.clone());
+            }
         }
 
-        // Apply global headers
-        if let Some(headers) = &app_config.headers {
-            config
-                .extra_headers
-                .extend(headers.iter().map(|(k, v)| (k.to_lowercase(), v.clone())));
+        // Load providers
+        if !app_config.providers.is_empty() {
+            for p in &app_config.providers {
+                let vendor = match p.vendor.as_deref() {
+                    Some("deepseek") => UpstreamVendor::DeepSeek,
+                    Some("openai") => UpstreamVendor::OpenAI,
+                    Some("anthropic") => UpstreamVendor::Anthropic,
+                    Some("xiaomimimo") => UpstreamVendor::XiaomiMimo,
+                    _ => UpstreamVendor::Auto.resolve(&p.base_url),
+                };
+                let format =
+                    UpstreamFormat::from_str(&p.format).unwrap_or(UpstreamFormat::OpenAiChat);
+                config.providers.push(ResolvedProvider {
+                    name: p.name.clone(),
+                    base_url: p.base_url.clone(),
+                    format,
+                    api_key: p.apikey.clone(),
+                    vendor,
+                    drop_images: p.drop_images,
+                    extra_headers: p.headers.clone(),
+                });
+            }
+        }
+
+        // Legacy flat config: create a single "default" provider
+        if config.providers.is_empty() && app_config.base_url.is_some() {
+            let vendor = match app_config.vendor.as_deref() {
+                Some("deepseek") => UpstreamVendor::DeepSeek,
+                Some("openai") => UpstreamVendor::OpenAI,
+                Some("anthropic") => UpstreamVendor::Anthropic,
+                Some("xiaomimimo") => UpstreamVendor::XiaomiMimo,
+                _ => UpstreamVendor::Auto,
+            };
+            let base_url = app_config.base_url.clone().unwrap_or_default();
+            // Resolve auto vendor
+            let vendor = vendor.resolve(&base_url);
+            let format = app_config
+                .format
+                .as_deref()
+                .and_then(UpstreamFormat::from_str)
+                .unwrap_or(UpstreamFormat::OpenAiChat);
+            config.providers.push(ResolvedProvider {
+                name: "default".to_string(),
+                base_url,
+                format,
+                api_key: app_config.apikey.clone(),
+                vendor,
+                drop_images: app_config.drop_images.unwrap_or(false),
+                extra_headers: app_config.headers.clone(),
+            });
+        }
+
+        // Load model aliases
+        for (alias, target) in &app_config.model_aliases {
+            if let Some((provider, model)) = target.split_once('/') {
+                config.alias_map.insert(
+                    alias,
+                    crate::translate::aliases::ModelAlias {
+                        provider: provider.to_string(),
+                        model: model.to_string(),
+                    },
+                );
+                tracing::info!("model alias: {} → {}", alias, target);
+            } else {
+                tracing::warn!(
+                    "Invalid model alias value: {} (expected provider/model)",
+                    target
+                );
+            }
         }
     }
 
     // 2. Apply environment variables
     if let Ok(url) = std::env::var("UPSTREAM_BASE_URL") {
-        config.base_url = url;
-    }
-    if let Ok(fmt) = std::env::var("UPSTREAM_FORMAT") {
-        if let Some(f) = UpstreamFormat::from_str(&fmt) {
-            config.upstream_format = f;
+        if config.providers.is_empty() {
+            let vendor = UpstreamVendor::Auto.resolve(&url);
+            let format = std::env::var("UPSTREAM_FORMAT")
+                .ok()
+                .and_then(|f| UpstreamFormat::from_str(&f))
+                .unwrap_or(UpstreamFormat::OpenAiChat);
+            config.providers.push(ResolvedProvider {
+                name: "default".to_string(),
+                base_url: url,
+                format,
+                api_key: std::env::var("UPSTREAM_API_KEY").ok(),
+                vendor,
+                drop_images: false,
+                extra_headers: HashMap::new(),
+            });
         }
-    }
-    if let Ok(key) = std::env::var("UPSTREAM_API_KEY") {
-        config.api_key = Some(key);
-    }
-    if let Ok(model) = std::env::var("UPSTREAM_MODEL") {
-        config.model = Some(model);
-    }
-    if let Ok(addr) = std::env::var("ADDR") {
-        config.addr = addr;
     }
 
     // Load .env file if exists
     let _ = dotenvy::dotenv().ok();
 
-    // Apply env var for reasoning truncation
-    if std::env::var("TRUNCATE_REASONING").as_deref() == Ok("true") {
-        config.truncate_reasoning = true;
+    // 3. Apply CLI overrides (highest priority)
+    // If CLI provides base_url, create/update a "cli" provider
+    if let Some(url) = cli_base_url {
+        let vendor = if let Some(v) = cli_vendor {
+            match v {
+                "deepseek" => UpstreamVendor::DeepSeek,
+                "openai" => UpstreamVendor::OpenAI,
+                "anthropic" => UpstreamVendor::Anthropic,
+                "xiaomimimo" => UpstreamVendor::XiaomiMimo,
+                _ => UpstreamVendor::Auto.resolve(url),
+            }
+        } else {
+            UpstreamVendor::Auto.resolve(url)
+        };
+        let format = cli_format
+            .and_then(UpstreamFormat::from_str)
+            .unwrap_or(UpstreamFormat::OpenAiChat);
+
+        // Replace or prepend "cli" provider
+        config
+            .providers
+            .retain(|p| p.name != "cli" && p.name != "default");
+        config.providers.insert(
+            0,
+            ResolvedProvider {
+                name: "cli".to_string(),
+                base_url: url.to_string(),
+                format,
+                api_key: cli_api_key.map(|s| s.to_string()),
+                vendor,
+                drop_images: cli_drop_images,
+                extra_headers: HashMap::new(),
+            },
+        );
     }
 
-    // 3. Apply CLI overrides (highest priority)
-    if let Some(url) = cli_base_url {
-        config.base_url = url.to_string();
-    }
-    if let Some(fmt) = cli_format {
-        if let Some(f) = UpstreamFormat::from_str(fmt) {
-            config.upstream_format = f;
-        }
-    }
-    if let Some(key) = cli_api_key {
-        config.api_key = Some(key.to_string());
-    }
-    if let Some(model) = cli_model {
-        config.model = Some(model.to_string());
-    }
-    if let Some(addr) = cli_addr {
-        config.addr = addr.to_string();
-    }
-    config.drop_images = cli_drop_images;
-    config.prefer_client_key = cli_prefer_client_key;
     if cli_no_cors {
         config.cors = false;
     }
@@ -306,15 +474,134 @@ pub fn load_config(
             config.access_log_dir = Some(format!("{}/logs", data_dir));
         }
     }
-    if let Some(v) = cli_vendor {
-        config.vendor = match v {
-            "deepseek" => UpstreamVendor::DeepSeek,
-            "openai" => UpstreamVendor::OpenAI,
-            "anthropic" => UpstreamVendor::Anthropic,
-            "auto" => UpstreamVendor::Auto,
-            _ => UpstreamVendor::Auto,
-        };
+    config.prefer_client_key = cli_prefer_client_key || config.prefer_client_key;
+    config.enable_reqlog = cli_enable_reqlog || config.enable_reqlog;
+
+    // Parse model aliases from CLI
+    for raw in cli_model_alias {
+        if let Some((alias, target)) = crate::translate::aliases::ModelAlias::parse(raw) {
+            tracing::info!(
+                "model alias: {} → {}/{}",
+                alias,
+                target.provider,
+                target.model
+            );
+            config.alias_map.insert(&alias, target);
+        } else {
+            tracing::warn!(
+                "Invalid model alias format: {} (expected alias=provider/model)",
+                raw
+            );
+        }
     }
 
+    // Ensure at least one provider exists
+    if config.providers.is_empty() {
+        let base_url = "https://api.openai.com".to_string();
+        config.providers.push(ResolvedProvider {
+            name: "default".to_string(),
+            base_url,
+            format: UpstreamFormat::OpenAiChat,
+            api_key: None,
+            vendor: UpstreamVendor::OpenAI,
+            drop_images: false,
+            extra_headers: HashMap::new(),
+        });
+    }
+
+    // Set default provider to first one
+    config.default_provider = config.providers[0].name.clone();
+
     Ok(config)
+}
+
+impl RuntimeConfig {
+    #[allow(dead_code)]
+    /// Resolve a model name to a provider.
+    ///   - "provider/model" -> exact match
+    ///   - "alias" -> alias_map lookup -> provider/model
+    ///   - no match -> default_provider
+    pub fn resolve_provider(&self, model: Option<&str>) -> Option<&ResolvedProvider> {
+        let model = model?;
+        // Direct provider/model reference
+        if let Some((provider_name, _upstream_model)) = model.split_once('/') {
+            return self
+                .providers
+                .iter()
+                .find(|p| p.name == provider_name)
+                .or_else(|| self.providers.first());
+        }
+        // Alias lookup
+        if let Some(target) = self.alias_map.resolve(model) {
+            return self
+                .providers
+                .iter()
+                .find(|p| p.name == target.provider)
+                .or_else(|| self.providers.first());
+        }
+        self.providers.first()
+    }
+}
+
+// Legacy accessors for RuntimeConfig to minimize server.rs changes
+impl RuntimeConfig {
+    pub fn base_url(&self) -> &str {
+        self.providers
+            .first()
+            .map(|p| p.base_url.as_str())
+            .unwrap_or("https://api.openai.com")
+    }
+    pub fn upstream_format(&self) -> &UpstreamFormat {
+        self.providers
+            .first()
+            .map(|p| &p.format)
+            .unwrap_or(&UpstreamFormat::OpenAiChat)
+    }
+    pub fn api_key(&self) -> Option<&str> {
+        self.providers.first().and_then(|p| p.api_key.as_deref())
+    }
+    pub fn vendor(&self) -> &UpstreamVendor {
+        self.providers
+            .first()
+            .map(|p| &p.vendor)
+            .unwrap_or(&UpstreamVendor::OpenAI)
+    }
+    pub fn drop_images(&self) -> bool {
+        self.drop_images
+            || self
+                .providers
+                .first()
+                .map(|p| p.drop_images)
+                .unwrap_or(false)
+    }
+    #[allow(dead_code)]
+    pub fn extra_headers(&self) -> Option<&HashMap<String, String>> {
+        self.providers.first().map(|p| &p.extra_headers)
+    }
+    /// Resolve model alias to upstream model name.
+    /// "gpt-5.5" -> alias lookup -> "deepseek-v4-pro"
+    /// "deepseek/deepseek-v4-pro" -> "deepseek-v4-pro"
+    /// "" or None -> empty string
+    pub fn resolve_upstream_model(&self, model: Option<&str>) -> String {
+        let model = match model {
+            Some(m) if !m.is_empty() => m,
+            _ => return String::new(),
+        };
+        // Direct provider/model reference
+        if let Some((_provider, upstream_model)) = model.split_once('/') {
+            return upstream_model.to_string();
+        }
+        // Alias lookup
+        if let Some(target) = self.alias_map.resolve(model) {
+            return target.model.clone();
+        }
+        // Return as-is
+        model.to_string()
+    }
+
+    /// Legacy: return default model name from first provider.
+    /// Server handlers should use resolve_provider instead.
+    pub fn model(&self) -> &str {
+        ""
+    }
 }

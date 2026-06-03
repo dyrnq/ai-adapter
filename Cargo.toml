@@ -19,7 +19,7 @@ tower-http = { version = "0.5", features = ["cors", "trace"] }
 tokio = { version = "1", features = ["full"] }
 
 # HTTP client
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -35,7 +35,6 @@ tracing-appender = "0.2"
 
 # Error handling
 anyhow = "1"
-thiserror = "1"
 
 # Config file
 serde_yaml = "0.9"
@@ -47,6 +46,7 @@ dotenvy = "0.15"
 tokio-stream = "0.1"
 futures = "0.3"
 redb = "2"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
 
 [profile.release]
 lto = true
