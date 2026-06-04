@@ -199,6 +199,9 @@ pub struct ServerConfig {
     /// Drop images from requests
     #[serde(rename = "dropImages", default)]
     pub drop_images: bool,
+    /// Hide models from OpenAI-compatible list (show only aliases)
+    #[serde(rename = "hideModelList", default)]
+    pub hide_model_list: bool,
 }
 
 fn default_addr() -> String {
@@ -353,6 +356,7 @@ pub fn load_config(
             config.prefer_client_key = server.prefer_client_key || app_config.prefer_client_key;
             config.truncate_reasoning = server.truncate_reasoning || app_config.truncate_reasoning;
             config.enable_reqlog = server.reqlog || app_config.reqlog;
+            config.hide_model_list = server.hide_model_list || app_config.hide_model_list;
             config.drop_images = server.drop_images || app_config.drop_images.unwrap_or(false);
         } else {
             config.log_http = app_config.log_http;
@@ -362,6 +366,7 @@ pub fn load_config(
             config.prefer_client_key = app_config.prefer_client_key;
             config.truncate_reasoning = app_config.truncate_reasoning;
             config.enable_reqlog = app_config.reqlog;
+            config.hide_model_list = app_config.hide_model_list;
             if let Some(d) = app_config.drop_images {
                 config.drop_images = d;
             }
