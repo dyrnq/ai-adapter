@@ -9,6 +9,7 @@ use super::store::StateStore;
 
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+    db_path: PathBuf,
 }
 
 impl SqliteStore {
@@ -41,13 +42,11 @@ impl SqliteStore {
                 req_headers TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_reqlog_ts ON reqlog(ts);
+            CREATE INDEX IF NOT EXISTS idx_reqlog_model ON reqlog(model);
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-            -- Migration: add cache columns if missing (safe to re-run)
-            ALTER TABLE reqlog ADD COLUMN cache_hit_tokens INTEGER;
-            ALTER TABLE reqlog ADD COLUMN cache_miss_tokens INTEGER;
             CREATE TABLE IF NOT EXISTS reasoning (
                 session_id TEXT NOT NULL,
                 response_id TEXT NOT NULL,
@@ -57,15 +56,33 @@ impl SqliteStore {
             );",
         )?;
 
+        // Idempotent migration: add cache columns if missing
+        // Idempotent migration: add indexes (safe to re-run)
+        conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_reqlog_model ON reqlog(model)")
+            .ok();
+        for col in &["cache_hit_tokens INTEGER", "cache_miss_tokens INTEGER"] {
+            let sql = format!("ALTER TABLE reqlog ADD COLUMN {}", col);
+            if let Err(e) = conn.execute_batch(&sql) {
+                tracing::debug!("Migration (ignored): {}", e);
+            }
+        }
+
+        let db_path = path;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            db_path,
         })
+    }
+
+    /// Lock the connection, recovering from a poisoned mutex.
+    fn locked(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
 impl StateStore for SqliteStore {
     fn session_record(&self, session_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.locked();
         conn.execute(
             "INSERT OR REPLACE INTO sessions (session_id) VALUES (?1)",
             [session_id],
@@ -74,7 +91,7 @@ impl StateStore for SqliteStore {
     }
 
     fn session_list(&self) -> Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.locked();
         let mut stmt = conn.prepare("SELECT session_id FROM sessions ORDER BY created_at DESC")?;
         let ids: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
@@ -84,7 +101,7 @@ impl StateStore for SqliteStore {
     }
 
     fn reasoning_save(&self, session_id: &str, response_id: &str, reasoning: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.locked();
         conn.execute(
             "INSERT OR REPLACE INTO reasoning (session_id, response_id, reasoning) VALUES (?1, ?2, ?3)",
             rusqlite::params![session_id, response_id, reasoning],
@@ -93,7 +110,7 @@ impl StateStore for SqliteStore {
     }
 
     fn reasoning_get(&self, session_id: &str, response_id: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.locked();
         let mut stmt = conn.prepare(
             "SELECT reasoning FROM reasoning WHERE session_id = ?1 AND response_id = ?2",
         )?;
@@ -104,7 +121,7 @@ impl StateStore for SqliteStore {
     }
 
     fn reasoning_remove(&self, session_id: &str, response_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.locked();
         conn.execute(
             "DELETE FROM reasoning WHERE session_id = ?1 AND response_id = ?2",
             rusqlite::params![session_id, response_id],
@@ -113,10 +130,10 @@ impl StateStore for SqliteStore {
     }
 
     fn reqlog(&self, entry: &super::store::ReqlogEntry) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.locked();
         conn.execute(
             "INSERT INTO reqlog (ts, method, path, status, latency_ms, provider, model, req_id, in_tokens, out_tokens, cache_hit_tokens, cache_miss_tokens, err_code, err_msg, req_body_preview, resp_body_preview, req_headers)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             rusqlite::params![
                 entry.ts,
                 entry.method,
@@ -161,7 +178,7 @@ impl StateStore for SqliteStore {
         let session_table_def: redb::TableDefinition<&str, &str> =
             redb::TableDefinition::new("session");
         if let Ok(table) = read_txn.open_table(session_table_def) {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.locked();
             for entry in table.iter().map_err(|e| anyhow!("Redb iter: {}", e))? {
                 let (k, _) = entry.map_err(|e| anyhow!("Redb entry: {}", e))?;
                 conn.execute(
@@ -177,7 +194,7 @@ impl StateStore for SqliteStore {
         let reasoning_table_def: redb::TableDefinition<&str, &str> =
             redb::TableDefinition::new("reasoning");
         if let Ok(table) = read_txn.open_table(reasoning_table_def) {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.locked();
             let mut reasoning_count = 0i64;
             for entry in table.iter().map_err(|e| anyhow!("Redb iter: {}", e))? {
                 let (k, v) = entry.map_err(|e| anyhow!("Redb entry: {}", e))?;
@@ -196,7 +213,7 @@ impl StateStore for SqliteStore {
             tracing::info!("Migrated {} reasoning entries from redb", reasoning_count);
         }
 
-        let migrated_path = redb_path.with_extension("redb.migrated");
+        let migrated_path = self.db_path.with_extension("redb.migrated");
         if let Err(e) = std::fs::rename(redb_path, &migrated_path) {
             tracing::warn!(
                 "Failed to rename {} -> {}: {}",

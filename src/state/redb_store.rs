@@ -14,13 +14,18 @@ pub struct RedbStore {
 }
 
 impl RedbStore {
+    /// Lock the redb database, recovering from a poisoned mutex.
+    fn locked(&self) -> std::sync::MutexGuard<'_, Database> {
+        self.db.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn new(path: PathBuf) -> Self {
         let db = Arc::new(Mutex::new(
             Database::create(&path).expect("Failed to open redb database"),
         ));
         let db_clone = db.clone();
         block_in_place(move || {
-            let db_guard = db_clone.lock().unwrap();
+            let db_guard = db_clone.lock().unwrap_or_else(|e| e.into_inner());
             let write_txn = db_guard.begin_write().expect("redb write txn failed");
             let _ = write_txn.open_table(SESSION_TABLE);
             let _ = write_txn.open_table(REASONING_TABLE);
@@ -32,7 +37,7 @@ impl RedbStore {
 
 impl StateStore for RedbStore {
     fn session_record(&self, session_id: &str) -> Result<()> {
-        let db = self.db.lock().unwrap();
+        let db = self.locked();
         let write_txn = db.begin_write()?;
         {
             let mut table = write_txn.open_table(SESSION_TABLE)?;
@@ -43,7 +48,7 @@ impl StateStore for RedbStore {
     }
 
     fn session_list(&self) -> Result<Vec<String>> {
-        let db = self.db.lock().unwrap();
+        let db = self.locked();
         let read_txn = db.begin_read()?;
         let table = read_txn.open_table(SESSION_TABLE)?;
         let result: Vec<String> = table
@@ -56,7 +61,7 @@ impl StateStore for RedbStore {
 
     fn reasoning_save(&self, session_id: &str, response_id: &str, reasoning: &str) -> Result<()> {
         let key = compose_key(session_id, response_id);
-        let db = self.db.lock().unwrap();
+        let db = self.locked();
         let write_txn = db.begin_write()?;
         {
             let mut table = write_txn.open_table(REASONING_TABLE)?;
@@ -68,7 +73,7 @@ impl StateStore for RedbStore {
 
     fn reasoning_get(&self, session_id: &str, response_id: &str) -> Result<Option<String>> {
         let key = compose_key(session_id, response_id);
-        let db = self.db.lock().unwrap();
+        let db = self.locked();
         let read_txn = db.begin_read()?;
         let table = read_txn.open_table(REASONING_TABLE)?;
         Ok(table.get(key.as_str())?.map(|v| v.value().to_string()))
@@ -76,7 +81,7 @@ impl StateStore for RedbStore {
 
     fn reasoning_remove(&self, session_id: &str, response_id: &str) -> Result<()> {
         let key = compose_key(session_id, response_id);
-        let db = self.db.lock().unwrap();
+        let db = self.locked();
         let write_txn = db.begin_write()?;
         {
             let mut table = write_txn.open_table(REASONING_TABLE)?;
