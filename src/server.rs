@@ -22,6 +22,14 @@ use tracing::Level;
 use crate::config::{ResolvedProvider, RuntimeConfig, UpstreamFormat};
 use crate::error::AdapterError;
 use crate::state::store::ReqlogEntry;
+
+/// Token usage data for request logging.
+struct TokenUsage {
+    in_tokens: Option<u32>,
+    out_tokens: Option<u32>,
+    cache_hit_tokens: Option<u32>,
+    cache_miss_tokens: Option<u32>,
+}
 use crate::state::{ReasoningCache, SessionStore};
 use crate::stream::sse::{
     AnthropicStreamTranslator, ChatStreamToResponsesTranslator, ResponsesStreamToChatTranslator,
@@ -56,6 +64,10 @@ pub fn build_router(
 ) -> Router {
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(300))
+        .pool_idle_timeout(std::time::Duration::from_secs(300))
+        .http2_keep_alive_interval(Some(std::time::Duration::from_secs(60)))
+        .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
+        .http2_keep_alive_while_idle(true)
         .build()
         .expect("Failed to create HTTP client");
 
@@ -907,10 +919,12 @@ async fn handle_chat_passthrough(
                     status.as_u16(),
                     provider,
                     &req.model,
-                    Some(in_tok),
-                    Some(out_tok),
-                    Some(cache_hit),
-                    Some(cache_miss),
+                    &TokenUsage {
+                        in_tokens: Some(in_tok),
+                        out_tokens: Some(out_tok),
+                        cache_hit_tokens: Some(cache_hit),
+                        cache_miss_tokens: Some(cache_miss),
+                    },
                 )
                 .await;
             }
@@ -1060,10 +1074,12 @@ async fn handle_chat_via_anthropic(
                             StatusCode::OK.as_u16(),
                             provider,
                             &model,
-                            Some(u.input_tokens),
-                            Some(u.output_tokens),
-                            Some(cache_hit),
-                            Some(cache_miss),
+                            &TokenUsage {
+                                in_tokens: Some(u.input_tokens),
+                                out_tokens: Some(u.output_tokens),
+                                cache_hit_tokens: Some(cache_hit),
+                                cache_miss_tokens: Some(cache_miss),
+                            },
                         )
                         .await;
 
@@ -1269,10 +1285,12 @@ async fn handle_responses(
                         status.as_u16(),
                         provider,
                         &upstream_model,
-                        Some(in_tok),
-                        Some(out_tok),
-                        Some(cache_hit),
-                        Some(cache_miss),
+                        &TokenUsage {
+                            in_tokens: Some(in_tok),
+                            out_tokens: Some(out_tok),
+                            cache_hit_tokens: Some(cache_hit),
+                            cache_miss_tokens: Some(cache_miss),
+                        },
                     )
                     .await;
                 }
@@ -1635,10 +1653,12 @@ async fn handle_responses_via_chat(
                 StatusCode::OK.as_u16(),
                 provider,
                 &upstream_model,
-                Some(in_tok),
-                Some(out_tok),
-                Some(cache_hit),
-                Some(cache_miss),
+                &TokenUsage {
+                    in_tokens: Some(in_tok),
+                    out_tokens: Some(out_tok),
+                    cache_hit_tokens: Some(cache_hit),
+                    cache_miss_tokens: Some(cache_miss),
+                },
             )
             .await;
         }
@@ -1935,10 +1955,12 @@ async fn handle_responses_via_anthropic(
                 StatusCode::OK.as_u16(),
                 provider,
                 &upstream_model,
-                Some(u.input_tokens),
-                Some(u.output_tokens),
-                Some(cache_hit),
-                Some(cache_miss),
+                &TokenUsage {
+                    in_tokens: Some(u.input_tokens),
+                    out_tokens: Some(u.output_tokens),
+                    cache_hit_tokens: Some(cache_hit),
+                    cache_miss_tokens: Some(cache_miss),
+                },
             )
             .await;
         }
@@ -2003,10 +2025,7 @@ async fn log_request(
     status: u16,
     provider: &crate::config::ResolvedProvider,
     model: &str,
-    in_tokens: Option<u32>,
-    out_tokens: Option<u32>,
-    cache_hit_tokens: Option<u32>,
-    cache_miss_tokens: Option<u32>,
+    usage: &TokenUsage,
 ) {
     if !state.config.enable_reqlog {
         return;
@@ -2023,10 +2042,10 @@ async fn log_request(
         provider: provider.name.clone(),
         model: model.to_string(),
         req_id: None,
-        in_tokens,
-        out_tokens,
-        cache_hit_tokens,
-        cache_miss_tokens,
+        in_tokens: usage.in_tokens,
+        out_tokens: usage.out_tokens,
+        cache_hit_tokens: usage.cache_hit_tokens,
+        cache_miss_tokens: usage.cache_miss_tokens,
         err_code: None,
         err_msg: None,
         req_body_preview: None,
