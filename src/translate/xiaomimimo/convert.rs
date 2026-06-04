@@ -35,7 +35,7 @@ pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> Anthropic
                     name: f.name,
                     description: f.description,
                     input_schema: schema,
-                    cache_control: None,
+                    cache_control: Some(serde_json::json!({"type": "ephemeral"})),
                 }
             })
             .collect()
