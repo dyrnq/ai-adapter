@@ -497,9 +497,11 @@ impl AnthropicStreamTranslator {
     }
 
     /// Return collected usage data for reqlog.
+    /// In Anthropic protocol, input_tokens = non-cached tokens only.
+    /// cache_read_tokens = cached tokens served.
     pub fn get_usage(&self) -> (u32, u32, u32, u32) {
         let hit = self.cache_read_tokens.unwrap_or(0);
-        let miss = self.cache_creation_tokens.unwrap_or(0);
+        let miss = self.input_tokens;
         (self.input_tokens, self.output_tokens, hit, miss)
     }
 
