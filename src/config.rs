@@ -20,6 +20,7 @@ pub enum UpstreamVendor {
     OpenAI,
     Anthropic,
     XiaomiMimo,
+    MiniMax,
     #[default]
     Auto,
 }
@@ -31,6 +32,7 @@ impl std::fmt::Display for UpstreamVendor {
             UpstreamVendor::OpenAI => write!(f, "openai"),
             UpstreamVendor::Anthropic => write!(f, "anthropic"),
             UpstreamVendor::XiaomiMimo => write!(f, "xiaomimimo"),
+            UpstreamVendor::MiniMax => write!(f, "minimaxi"),
             UpstreamVendor::Auto => write!(f, "auto"),
         }
     }
@@ -43,6 +45,8 @@ impl UpstreamVendor {
             UpstreamVendor::Auto => {
                 if base_url.contains("xiaomimimo") {
                     UpstreamVendor::XiaomiMimo
+                } else if base_url.contains("minimaxi") {
+                    UpstreamVendor::MiniMax
                 } else if base_url.contains("deepseek") {
                     UpstreamVendor::DeepSeek
                 } else if base_url.contains("anthropic") {
@@ -170,8 +174,8 @@ pub struct AppConfig {
     /// Truncate reasoning to 32KB
     #[serde(rename = "truncateReasoning", default)]
     pub truncate_reasoning: bool,
-    #[serde(rename = "hideModelList", default)]
-    pub hide_model_list: bool,
+    #[serde(rename = "exposeUpstreamModels", default)]
+    pub expose_upstream_models: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,8 +204,8 @@ pub struct ServerConfig {
     #[serde(rename = "dropImages", default)]
     pub drop_images: bool,
     /// Hide models from OpenAI-compatible list (show only aliases)
-    #[serde(rename = "hideModelList", default)]
-    pub hide_model_list: bool,
+    #[serde(rename = "exposeUpstreamModels", default)]
+    pub expose_upstream_models: bool,
 }
 
 fn default_addr() -> String {
@@ -222,6 +226,8 @@ pub struct ResolvedProvider {
     pub vendor: UpstreamVendor,
     pub drop_images: bool,
     pub extra_headers: HashMap<String, String>,
+    #[allow(dead_code)]
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -234,7 +240,7 @@ pub struct RuntimeConfig {
     pub prefer_client_key: bool,
     pub truncate_reasoning: bool,
     pub drop_images: bool,
-    pub hide_model_list: bool,
+    pub expose_upstream_models: bool,
     /// Resolved alias map: alias -> (provider_name, upstream_model)
     pub alias_map: crate::translate::aliases::ModelAliasMap,
     /// All configured providers
@@ -254,7 +260,7 @@ impl Default for RuntimeConfig {
             prefer_client_key: false,
             truncate_reasoning: false,
             drop_images: false,
-            hide_model_list: false,
+            expose_upstream_models: false,
             alias_map: crate::translate::aliases::ModelAliasMap::new(),
             providers: Vec::new(),
             default_provider: "default".to_string(),
@@ -356,7 +362,8 @@ pub fn load_config(
             config.prefer_client_key = server.prefer_client_key || app_config.prefer_client_key;
             config.truncate_reasoning = server.truncate_reasoning || app_config.truncate_reasoning;
             config.enable_reqlog = server.reqlog || app_config.reqlog;
-            config.hide_model_list = server.hide_model_list || app_config.hide_model_list;
+            config.expose_upstream_models =
+                server.expose_upstream_models || app_config.expose_upstream_models;
             config.drop_images = server.drop_images || app_config.drop_images.unwrap_or(false);
         } else {
             config.log_http = app_config.log_http;
@@ -366,7 +373,7 @@ pub fn load_config(
             config.prefer_client_key = app_config.prefer_client_key;
             config.truncate_reasoning = app_config.truncate_reasoning;
             config.enable_reqlog = app_config.reqlog;
-            config.hide_model_list = app_config.hide_model_list;
+            config.expose_upstream_models = app_config.expose_upstream_models;
             if let Some(d) = app_config.drop_images {
                 config.drop_images = d;
             }
@@ -387,6 +394,7 @@ pub fn load_config(
                     Some("openai") => UpstreamVendor::OpenAI,
                     Some("anthropic") => UpstreamVendor::Anthropic,
                     Some("xiaomimimo") => UpstreamVendor::XiaomiMimo,
+                    Some("minimaxi") => UpstreamVendor::MiniMax,
                     _ => UpstreamVendor::Auto.resolve(&p.base_url),
                 };
                 let format = p
@@ -402,6 +410,7 @@ pub fn load_config(
                     vendor,
                     drop_images: p.drop_images,
                     extra_headers: p.headers.clone(),
+                    models: p.models.clone(),
                 });
             }
         }
@@ -413,6 +422,7 @@ pub fn load_config(
                 Some("openai") => UpstreamVendor::OpenAI,
                 Some("anthropic") => UpstreamVendor::Anthropic,
                 Some("xiaomimimo") => UpstreamVendor::XiaomiMimo,
+                Some("minimaxi") => UpstreamVendor::MiniMax,
                 _ => UpstreamVendor::Auto,
             };
             let base_url = app_config.base_url.clone().unwrap_or_default();
@@ -431,6 +441,7 @@ pub fn load_config(
                 vendor,
                 drop_images: app_config.drop_images.unwrap_or(false),
                 extra_headers: app_config.headers.clone(),
+                models: vec![],
             });
         }
 
@@ -470,6 +481,7 @@ pub fn load_config(
                 vendor,
                 drop_images: false,
                 extra_headers: HashMap::new(),
+                models: vec![],
             });
         }
     }
@@ -486,6 +498,7 @@ pub fn load_config(
                 "openai" => UpstreamVendor::OpenAI,
                 "anthropic" => UpstreamVendor::Anthropic,
                 "xiaomimimo" => UpstreamVendor::XiaomiMimo,
+                "minimaxi" => UpstreamVendor::MiniMax,
                 _ => UpstreamVendor::Auto.resolve(url),
             }
         } else {
@@ -509,6 +522,7 @@ pub fn load_config(
                 vendor,
                 drop_images: cli_drop_images,
                 extra_headers: HashMap::new(),
+                models: vec![],
             },
         );
     }
@@ -558,6 +572,7 @@ pub fn load_config(
             vendor: UpstreamVendor::OpenAI,
             drop_images: false,
             extra_headers: HashMap::new(),
+            models: vec![],
         });
     }
 
@@ -683,7 +698,7 @@ impl RuntimeConfig {
         ""
     }
 
-    pub fn hide_model_list(&self) -> bool {
-        self.hide_model_list
+    pub fn expose_upstream_models(&self) -> bool {
+        self.expose_upstream_models
     }
 }
