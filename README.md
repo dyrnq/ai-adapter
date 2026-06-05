@@ -48,7 +48,31 @@ cargo build
 ./target/debug/ai-adapter -c ai-adapter.example.yaml
 ```
 
-Point Codex at `http://127.0.0.1:9090/v1`.
+### Codex CLI Setup
+
+Configure Codex to use ai-adapter by editing `~/.codex/config.toml`:
+
+```toml
+[model_providers.adapter]
+name = "Proxy"
+base_url = "http://127.0.0.1:9090/v1"
+wire_api = "responses"
+```
+
+Create a profile to use a specific model (e.g. `~/.codex/deepseek.config.toml`):
+
+```toml
+model = "deepseek-v4-pro"
+model_provider = "adapter"
+```
+
+Then launch Codex:
+
+```bash
+codex --profile deepseek --dangerously-bypass-approvals-and-sandbox -s danger-full-access
+```
+
+For convenience, use one profile per model (e.g. `deepseek-flash`, `xiaomi`, `minimax-pro`) and switch via `--profile`.
 
 ## Configuration
 
