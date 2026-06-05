@@ -32,6 +32,7 @@ pub fn chat_provider_for(vendor: &UpstreamVendor) -> Box<dyn Provider> {
     match vendor {
         UpstreamVendor::DeepSeek | UpstreamVendor::Auto => Box::new(DeepSeekProvider),
         UpstreamVendor::XiaomiMimo => Box::new(XiaomiMimoProvider),
+        UpstreamVendor::MiniMax => Box::new(DeepSeekProvider),
         UpstreamVendor::OpenAI | UpstreamVendor::Anthropic => Box::new(OpenAiProvider),
     }
 }
@@ -41,6 +42,7 @@ pub fn chat_provider_for(vendor: &UpstreamVendor) -> Box<dyn Provider> {
 pub fn anthropic_provider_for(vendor: &UpstreamVendor) -> Box<dyn Provider> {
     match vendor {
         UpstreamVendor::XiaomiMimo => Box::new(XiaomiMimoProvider),
+        UpstreamVendor::MiniMax => Box::new(DeepSeekProvider),
         _ => Box::new(DeepSeekProvider),
     }
 }
