@@ -114,7 +114,7 @@ pub fn build_router(
         .route("/health", get(handle_health))
         .route("/__/models", get(handle_models))
         .route("/__/session", get(handle_session_list))
-        .route("/v1/*path", any(handle_passthrough_any))
+        .route("/v1/{*path}", any(handle_passthrough_any))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .layer(error_dump_layer)
         .layer(trace_layer)
@@ -2036,9 +2036,13 @@ async fn handle_passthrough_any(
     method: Method,
     headers: HeaderMap,
     uri: axum::http::Uri,
-    body: Option<String>,
+    body: String,
 ) -> Response {
-    let body_str = body.as_deref();
+    let body_str = if body.is_empty() {
+        None
+    } else {
+        Some(body.as_str())
+    };
     passthrough_request(&state, &headers, method, &uri, body_str).await
 }
 
