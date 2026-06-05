@@ -72,7 +72,36 @@ Then launch Codex:
 codex --profile deepseek --dangerously-bypass-approvals-and-sandbox -s danger-full-access
 ```
 
-For convenience, use one profile per model (e.g. `deepseek-flash`, `xiaomi`, `minimax-pro`) and switch via `--profile`.
+### Profile Examples
+
+Each model gets its own profile file under `~/.codex/`:
+
+**DeepSeek** (`~/.codex/deepseek-flash.config.toml`):
+```toml
+model = "deepseek-v4-flash"
+model_provider = "adapter"
+```
+
+**Xiaomi MiMo** (`~/.codex/mimo.config.toml`):
+```toml
+model = "mimo-v2.5-pro"
+model_provider = "adapter"
+```
+
+**MiniMax** (`~/.codex/minimax.config.toml`):
+```toml
+model = "MiniMax-M3"
+model_provider = "adapter"
+```
+
+Launch with:
+```bash
+codex --profile deepseek-flash --dangerously-bypass-approvals-and-sandbox -s danger-full-access
+# or
+codex --profile mimo ...
+# or
+codex --profile minimax ...
+```
 
 ## Configuration
 
