@@ -183,7 +183,7 @@ async fn handle_models(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 async fn handle_models_list(State(state): State<AppState>) -> impl IntoResponse {
-    if state.config.hide_model_list() {
+    if state.config.expose_upstream_models() {
         // Return aliases (recognizable by Codex CLI)
         handle_models_v1_inner(&state).await.into_response()
     } else {
@@ -333,8 +333,9 @@ async fn compact_via_chat(
         "temperature": 0.3,
     });
 
+    let body_json = serde_json::to_string(&chat_req).unwrap_or_default();
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %model, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %model, req_bytes = %body_json.len(), "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -346,8 +347,6 @@ async fn compact_via_chat(
             upstream_headers.insert(HeaderName::from_static("authorization"), val);
         }
     }
-
-    let body_json = serde_json::to_string(&chat_req).unwrap_or_default();
 
     match state
         .client
@@ -444,7 +443,7 @@ async fn compact_via_anthropic(
     let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
 
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %anthropic_req.model, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %anthropic_req.model, req_bytes = %body_json.len(), "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -607,7 +606,8 @@ async fn handle_chat_completions(
 
     // Determine upstream URL
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/responses");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %chat_req.model, "upstream");
+    let body_json = serde_json::to_string(&responses_req).unwrap_or_default();
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %chat_req.model, req_bytes = %body_json.len(), "upstream");
     // Build upstream request
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -619,8 +619,6 @@ async fn handle_chat_completions(
             upstream_headers.insert(HeaderName::from_static("authorization"), val);
         }
     }
-
-    let body_json = serde_json::to_string(&responses_req).unwrap_or_default();
 
     tracing::debug!("Chat->Responses request: POST {}", upstream_url);
 
@@ -792,7 +790,8 @@ async fn handle_chat_passthrough(
     api_key: Option<String>,
 ) -> Response {
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %req.model, "upstream");
+    let body_json = serde_json::to_string(req).unwrap_or_default();
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %req.model, req_bytes = %body_json.len(), "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -804,8 +803,6 @@ async fn handle_chat_passthrough(
             upstream_headers.insert(HeaderName::from_static("authorization"), val);
         }
     }
-
-    let body_json = serde_json::to_string(req).unwrap_or_default();
     tracing::debug!("Chat passthrough: POST {}", upstream_url);
 
     let upstream_resp = match state
@@ -952,8 +949,9 @@ async fn handle_chat_via_anthropic(
     let responses_req = convert_chat_to_responses(req);
     let anthropic_req = convert_responses_to_anthropic(&responses_req);
 
+    let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %req.model, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %req.model, req_bytes = %body_json.len(), "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -979,7 +977,6 @@ async fn handle_chat_via_anthropic(
         }
     }
 
-    let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
     tracing::debug!("Chat->Anthropic: POST {}", upstream_url);
 
     let upstream_resp = match state
@@ -1065,7 +1062,7 @@ async fn handle_chat_via_anthropic(
                         // Log request
                         let u = &anthropic_resp.usage;
                         let cache_hit = u.cache_read_input_tokens.unwrap_or(0);
-                        let cache_miss = u.cache_creation_input_tokens.unwrap_or(0);
+                        let cache_miss = u.input_tokens;
                         log_request(
                             state,
                             start,
@@ -1219,7 +1216,8 @@ async fn handle_responses(
     }
 
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/responses");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %responses_req.model, "upstream");
+    let body_json = serde_json::to_string(&responses_req).unwrap_or_default();
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %responses_req.model, req_bytes = %body_json.len(), "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1231,8 +1229,6 @@ async fn handle_responses(
             upstream_headers.insert(HeaderName::from_static("authorization"), val);
         }
     }
-
-    let body_json = serde_json::to_string(&responses_req).unwrap_or_default();
 
     let start = Instant::now();
     match state
@@ -1389,8 +1385,9 @@ async fn handle_responses_via_chat(
         _ => convert_for_deepseek(&req, previous_reasoning),
     };
 
+    let body_json = serde_json::to_string(&chat_req).unwrap_or_default();
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/chat/completions");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %chat_req.model, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %chat_req.model, req_bytes = %body_json.len(), "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1403,7 +1400,6 @@ async fn handle_responses_via_chat(
         }
     }
 
-    let body_json = serde_json::to_string(&chat_req).unwrap_or_default();
     tracing::debug!(
         "Responses->Chat body: {}",
         &body_json[..body_json.len().min(2000)]
@@ -1704,8 +1700,9 @@ async fn handle_responses_via_anthropic(
 
     let anthropic_req = convert_responses_to_anthropic_for(req, &provider.vendor);
 
+    let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %anthropic_req.model, "upstream");
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %anthropic_req.model, req_bytes = %body_json.len(), "upstream");
 
     let mut upstream_headers = HeaderMap::new();
     upstream_headers.insert(
@@ -1731,7 +1728,6 @@ async fn handle_responses_via_anthropic(
         }
     }
 
-    let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
     tracing::debug!("Responses->Anthropic request to {}", upstream_url);
 
     let start = Instant::now();
@@ -1946,7 +1942,7 @@ async fn handle_responses_via_anthropic(
         {
             let u = &anthropic_resp.usage;
             let cache_hit = u.cache_read_input_tokens.unwrap_or(0);
-            let cache_miss = u.cache_creation_input_tokens.unwrap_or(0);
+            let cache_miss = u.input_tokens;
             log_request(
                 state,
                 start,
