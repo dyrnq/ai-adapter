@@ -667,20 +667,7 @@ async fn handle_chat_completions(
             let mut buffer = String::new();
             futures::pin_mut!(byte_stream);
 
-            'outer: loop {
-                let result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
-                    byte_stream.next(),
-                )
-                .await
-                {
-                    Ok(Some(r)) => r,
-                    Ok(None) => break 'outer,
-                    Err(_) => {
-                        tracing::warn!("Stream idle timeout (30s), breaking stream");
-                        break 'outer;
-                    }
-                };
+            'outer: while let Some(result) = byte_stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -763,6 +750,7 @@ async fn handle_chat_completions(
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        tracing::info!("Stream completed: responses to chat");
         Sse::new(stream).into_response()
     } else {
         // Non-stream: convert Responses response -> Chat response
@@ -855,18 +843,7 @@ async fn handle_chat_passthrough(
         tokio::spawn(async move {
             let mut buffer = String::new();
             futures::pin_mut!(stream);
-            'sse: loop {
-                let result =
-                    match tokio::time::timeout(std::time::Duration::from_secs(30), stream.next())
-                        .await
-                    {
-                        Ok(Some(r)) => r,
-                        Ok(None) => break 'sse,
-                        Err(_) => {
-                            tracing::warn!("Stream idle timeout (30s), breaking stream");
-                            break 'sse;
-                        }
-                    };
+            'sse: while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -1037,18 +1014,7 @@ async fn handle_chat_via_anthropic(
         tokio::spawn(async move {
             let mut buffer = String::new();
             futures::pin_mut!(stream);
-            'sse: loop {
-                let result =
-                    match tokio::time::timeout(std::time::Duration::from_secs(30), stream.next())
-                        .await
-                    {
-                        Ok(Some(r)) => r,
-                        Ok(None) => break 'sse,
-                        Err(_) => {
-                            tracing::warn!("Stream idle timeout (30s), breaking stream");
-                            break 'sse;
-                        }
-                    };
+            'sse: while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -1501,18 +1467,7 @@ async fn handle_responses_via_chat(
             let mut buffer = String::new();
 
             futures::pin_mut!(stream);
-            'sse: loop {
-                let result =
-                    match tokio::time::timeout(std::time::Duration::from_secs(30), stream.next())
-                        .await
-                    {
-                        Ok(Some(r)) => r,
-                        Ok(None) => break 'sse,
-                        Err(_) => {
-                            tracing::warn!("Stream idle timeout (30s), breaking stream");
-                            break 'sse;
-                        }
-                    };
+            'sse: while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
@@ -1835,18 +1790,7 @@ async fn handle_responses_via_anthropic(
             let mut buffer = String::new();
 
             futures::pin_mut!(stream);
-            'sse: loop {
-                let result =
-                    match tokio::time::timeout(std::time::Duration::from_secs(30), stream.next())
-                        .await
-                    {
-                        Ok(Some(r)) => r,
-                        Ok(None) => break 'sse,
-                        Err(_) => {
-                            tracing::warn!("Stream idle timeout (30s), breaking stream");
-                            break 'sse;
-                        }
-                    };
+            'sse: while let Some(result) = stream.next().await {
                 match result {
                     Ok(bytes) => {
                         let s = String::from_utf8_lossy(&bytes);
