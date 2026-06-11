@@ -26,6 +26,6 @@ impl Provider for AnthropicProvider {
     }
 
     fn responses_to_anthropic(&self, req: &ResponsesRequest) -> AnthropicRequest {
-        convert_responses_to_anthropic(req)
+        convert_responses_to_anthropic(req, None)
     }
 }

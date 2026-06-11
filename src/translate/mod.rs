@@ -41,10 +41,11 @@ pub use deepseek::chat::convert_responses_to_chat as convert_for_deepseek;
 pub fn convert_responses_to_anthropic_for(
     responses: &ResponsesRequest,
     vendor: &UpstreamVendor,
+    previous_reasoning: Option<String>,
 ) -> AnthropicRequest {
     match vendor {
         UpstreamVendor::XiaomiMimo => xiaomimimo::convert_responses_to_anthropic(responses),
-        _ => convert_responses_to_anthropic(responses),
+        _ => convert_responses_to_anthropic(responses, previous_reasoning),
     }
 }
 /// Re-export common functions for server.rs compatibility

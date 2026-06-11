@@ -948,7 +948,7 @@ async fn handle_chat_via_anthropic(
 ) -> Response {
     // Two-step conversion: Chat -> Responses -> Anthropic
     let responses_req = convert_chat_to_responses(req);
-    let anthropic_req = convert_responses_to_anthropic(&responses_req);
+    let anthropic_req = convert_responses_to_anthropic(&responses_req, None);
 
     let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
@@ -1678,7 +1678,7 @@ async fn handle_responses_via_anthropic(
     session_id: Option<String>,
 ) -> Response {
     // Look up reasoning from previous response (mirrors Chat path)
-    let _previous_reasoning = if let Some(ref prev_id) = req.previous_response_id {
+    let previous_reasoning = if let Some(ref prev_id) = req.previous_response_id {
         let sid = session_id.as_deref().unwrap_or("unknown");
         match state.reason_cache.get(sid, prev_id).await {
             Ok(Some(r)) => {
@@ -1699,7 +1699,8 @@ async fn handle_responses_via_anthropic(
         None
     };
 
-    let anthropic_req = convert_responses_to_anthropic_for(req, &provider.vendor);
+    let anthropic_req =
+        convert_responses_to_anthropic_for(req, &provider.vendor, previous_reasoning);
 
     let body_json = serde_json::to_string(&anthropic_req).unwrap_or_default();
     let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");

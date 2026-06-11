@@ -20,7 +20,10 @@ use serde_json::Value;
 /// - Sanitizes: ensures the conversation ends with a user message and repairs
 ///   tool_use/tool_result adjacency.
 /// - Converts tools via `ResponsesTool::get_function()`.
-pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> AnthropicRequest {
+pub fn convert_responses_to_anthropic(
+    responses: &ResponsesRequest,
+    previous_reasoning: Option<String>,
+) -> AnthropicRequest {
     // --- system prompt from instructions ---
     let system = responses.instructions.as_ref().map(|inst| {
         AnthropicSystem::Blocks(vec![AnthropicTextBlock {
@@ -32,6 +35,8 @@ pub fn convert_responses_to_anthropic(responses: &ResponsesRequest) -> Anthropic
 
     // --- build messages from input items ---
     let messages = build_anthropic_messages(responses.input.as_deref().unwrap_or(&[]));
+    // --- inject previous reasoning as Thinking blocks (required by DeepSeek) ---
+    let messages = inject_thinking_into_messages(messages, previous_reasoning);
 
     // --- build tools via get_function() ---
     let tools = responses.tools.as_ref().map(|ts| {
@@ -367,6 +372,58 @@ fn flush_pending(pending: &mut Option<PendingGroup>, messages: &mut Vec<Anthropi
 }
 
 // ============================================================================
+/// Inject previous_reasoning as Thinking blocks into the last assistant message.
+///
+/// DeepSeek's Anthropic endpoint requires that when thinking mode is enabled,
+/// the Thinking content blocks from previous responses MUST be passed back in
+/// subsequent requests ("The `content[].thinking` in the thinking mode must be
+/// passed back to the API").  This function prepends a Thinking block to the
+/// last assistant message in the message list, mirroring what the Chat path
+/// does with `reasoning_content` injection.
+fn inject_thinking_into_messages(
+    mut messages: Vec<AnthropicMessage>,
+    reasoning: Option<String>,
+) -> Vec<AnthropicMessage> {
+    let Some(reasoning) = reasoning else {
+        return messages;
+    };
+    if reasoning.is_empty() {
+        return messages;
+    }
+    tracing::debug!(
+        "Injecting {} bytes of thinking into messages",
+        reasoning.len()
+    );
+
+    // Find the last assistant message and prepend a Thinking block
+    if let Some(msg) = messages.iter_mut().rev().find(|m| m.role == "assistant") {
+        match &mut msg.content {
+            AnthropicMessageContent::Blocks(blocks) => {
+                blocks.insert(
+                    0,
+                    AnthropicContentBlock::Thinking {
+                        thinking: reasoning,
+                        signature: None,
+                    },
+                );
+            }
+            AnthropicMessageContent::String(text) => {
+                let mut blocks = vec![AnthropicContentBlock::Thinking {
+                    thinking: reasoning,
+                    signature: None,
+                }];
+                blocks.push(AnthropicContentBlock::Text {
+                    text: std::mem::take(text),
+                    cache_control: None,
+                });
+                msg.content = AnthropicMessageContent::Blocks(blocks);
+            }
+        }
+    }
+
+    messages
+}
+
 // Internal helpers — role & content mapping
 // ============================================================================
 
@@ -642,7 +699,7 @@ mod tests {
             input: Some(vec![]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         match result.system {
             Some(AnthropicSystem::Blocks(blocks)) => {
                 assert_eq!(blocks[0].text, "Be helpful.");
@@ -658,7 +715,7 @@ mod tests {
             input: Some(vec![]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         assert!(result.system.is_none());
     }
 
@@ -676,7 +733,7 @@ mod tests {
             }]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         assert_eq!(result.messages[0].role, "assistant");
     }
 
@@ -694,7 +751,7 @@ mod tests {
             }]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         assert_eq!(result.messages[0].role, "user");
     }
 
@@ -713,7 +770,7 @@ mod tests {
             }),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         match result.thinking {
             Some(AnthropicThinkingConfig::Enabled { budget_tokens }) => {
                 assert_eq!(budget_tokens, 1024);
@@ -733,7 +790,7 @@ mod tests {
             }),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         match result.thinking {
             Some(AnthropicThinkingConfig::Enabled { budget_tokens }) => {
                 assert_eq!(budget_tokens, 4096);
@@ -753,7 +810,7 @@ mod tests {
             }),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         match result.thinking {
             Some(AnthropicThinkingConfig::Enabled { budget_tokens }) => {
                 assert_eq!(budget_tokens, 8192);
@@ -769,7 +826,7 @@ mod tests {
             input: Some(vec![]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         assert!(matches!(
             result.thinking,
             Some(AnthropicThinkingConfig::Disabled)
@@ -788,7 +845,7 @@ mod tests {
             }),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         assert_eq!(result.max_tokens, 1024 + 4096);
     }
 
@@ -818,7 +875,7 @@ mod tests {
             ]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         // One assistant message with two tool_use blocks, plus trailing user
         assert_eq!(result.messages.len(), 2);
         assert_eq!(result.messages[0].role, "assistant");
@@ -851,7 +908,7 @@ mod tests {
             ]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         assert_eq!(result.messages[0].role, "user"); // not "assistant" first
         if let AnthropicMessageContent::Blocks(ref blocks) = result.messages[0].content {
             assert_eq!(blocks.len(), 2);
@@ -886,7 +943,7 @@ mod tests {
             }]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         assert_eq!(result.messages.last().unwrap().role, "user");
     }
 
@@ -913,7 +970,7 @@ mod tests {
             }]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
         let tools = result.tools.unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "search");
@@ -1191,7 +1248,7 @@ mod tests {
             ]),
             ..default_responses_request()
         };
-        let result = convert_responses_to_anthropic(&req);
+        let result = convert_responses_to_anthropic(&req, None);
 
         // Find the assistant message with tool_use
         let tool_use_pos = result

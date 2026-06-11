@@ -31,6 +31,6 @@ impl Provider for DeepSeekProvider {
     }
 
     fn responses_to_anthropic(&self, req: &ResponsesRequest) -> AnthropicRequest {
-        ds_responses_to_anthropic(req)
+        ds_responses_to_anthropic(req, None)
     }
 }
