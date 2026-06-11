@@ -42,10 +42,11 @@ pub fn convert_responses_to_anthropic_for(
     responses: &ResponsesRequest,
     vendor: &UpstreamVendor,
     previous_reasoning: Option<String>,
+    thinking_budget: u32,
 ) -> AnthropicRequest {
     match vendor {
         UpstreamVendor::XiaomiMimo => xiaomimimo::convert_responses_to_anthropic(responses),
-        _ => convert_responses_to_anthropic(responses, previous_reasoning),
+        _ => convert_responses_to_anthropic(responses, previous_reasoning, thinking_budget),
     }
 }
 /// Re-export common functions for server.rs compatibility

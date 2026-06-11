@@ -129,6 +129,12 @@ pub struct ProviderConfig {
     /// Drop images from requests (for text-only upstreams)
     #[serde(rename = "dropImages", default)]
     pub drop_images: bool,
+    #[serde(rename = "thinking", default = "default_thinking_budget")]
+    pub thinking_budget: u32,
+}
+
+fn default_thinking_budget() -> u32 {
+    8192
 }
 
 /// Main config structure (YAML/JSON config file)
@@ -228,6 +234,7 @@ pub struct ResolvedProvider {
     pub extra_headers: HashMap<String, String>,
     #[allow(dead_code)]
     pub models: Vec<String>,
+    pub thinking_budget: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -411,6 +418,7 @@ pub fn load_config(
                     drop_images: p.drop_images,
                     extra_headers: p.headers.clone(),
                     models: p.models.clone(),
+                    thinking_budget: p.thinking_budget,
                 });
             }
         }
@@ -442,6 +450,7 @@ pub fn load_config(
                 drop_images: app_config.drop_images.unwrap_or(false),
                 extra_headers: app_config.headers.clone(),
                 models: vec![],
+                thinking_budget: 8192,
             });
         }
 
@@ -482,6 +491,7 @@ pub fn load_config(
                 drop_images: false,
                 extra_headers: HashMap::new(),
                 models: vec![],
+                thinking_budget: 8192,
             });
         }
     }
@@ -523,6 +533,7 @@ pub fn load_config(
                 drop_images: cli_drop_images,
                 extra_headers: HashMap::new(),
                 models: vec![],
+                thinking_budget: 8192,
             },
         );
     }
@@ -573,6 +584,7 @@ pub fn load_config(
             drop_images: false,
             extra_headers: HashMap::new(),
             models: vec![],
+            thinking_budget: 8192,
         });
     }
 
