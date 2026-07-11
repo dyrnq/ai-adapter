@@ -2064,10 +2064,35 @@ async fn handle_anthropic_messages(
         HeaderName::from_static("content-type"),
         HeaderValue::from_static("application/json"),
     );
+    // anthropic-version: prefer the version the client sent, fall back to a
+    // reasonable default. Clients on newer beta features may pin a specific
+    // version and silently break if we hardcode 2023-06-01.
+    const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
     upstream_headers.insert(
         HeaderName::from_static("anthropic-version"),
-        HeaderValue::from_static("2023-06-01"),
+        headers
+            .get("anthropic-version")
+            .cloned()
+            .unwrap_or_else(|| HeaderValue::from_static(DEFAULT_ANTHROPIC_VERSION)),
     );
+    // Forward whitelisted Anthropic-specific headers from the client request.
+    // These gate beta features (prompt caching, extended thinking, computer
+    // use, files API, claude-code SDK) — silently dropping them disables
+    // those features with no diagnostic. CORS already allows these headers
+    // through (see allow_headers near the top of this file).
+    const CLIENT_HEADER_PASSTHROUGH: &[&str] = &[
+        "anthropic-beta",
+        "anthropic-dangerous-direct-browser-access",
+    ];
+    for name in CLIENT_HEADER_PASSTHROUGH {
+        if let Some(value) = headers.get(*name) {
+            // HeaderName::from_bytes on a static ASCII name is infallible.
+            upstream_headers.insert(
+                HeaderName::from_bytes(name.as_bytes()).expect("static header name"),
+                value.clone(),
+            );
+        }
+    }
     if let Some(ref key) = api_key {
         match provider.vendor {
             crate::config::UpstreamVendor::XiaomiMimo => {
@@ -2117,13 +2142,22 @@ async fn handle_anthropic_messages(
     };
 
     let status = resp.status();
-    // Skip hop-by-hop headers per RFC 7230; also drop content-length so
-    // axum recomputes it from the actual response body (the upstream value
-    // would otherwise pin a length that no longer matches what we return).
+    // Response header forwarding:
+    // - Skip hop-by-hop per RFC 7230 (transfer-encoding, connection).
+    // - Skip content-length so axum recomputes it from the actual body bytes
+    //   we return (the upstream value pins a length that no longer matches).
+    // - Skip content-encoding because reqwest auto-decompresses gzip/brotli
+    //   in both resp.bytes() (buffered) and resp.bytes_stream() (streaming),
+    //   so forwarding the original encoding header would mislead the client
+    //   into trying to decompress plaintext.
     let mut response_headers = HeaderMap::new();
     for (name, value) in resp.headers().iter() {
         let n = name.as_str();
-        if n == "transfer-encoding" || n == "connection" || n == "content-length" {
+        if n == "transfer-encoding"
+            || n == "connection"
+            || n == "content-length"
+            || n == "content-encoding"
+        {
             continue;
         }
         response_headers.insert(name.clone(), value.clone());
