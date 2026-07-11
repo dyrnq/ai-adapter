@@ -87,7 +87,10 @@ pub fn convert_responses_to_anthropic(
                     budget_tokens: thinking_budget,
                 })
             } else {
-                None
+                // The comment above says "default Disabled"; the prior code
+                // returned None, which made the no_reasoning_defaults_to_disabled
+                // test (and the broader DeepSeek-Anthropic thinking flow) fail.
+                Some(AnthropicThinkingConfig::Disabled)
             }
         }
     };
