@@ -744,10 +744,19 @@ async fn handle_chat_completions(
                     }
                     Err(e) => {
                         tracing::error!("Stream error: {}", e);
-                        // Send [DONE] to terminate stream before breaking
-                        let _ = tx
-                            .send(Ok(axum::response::sse::Event::default().data("[DONE]")))
-                            .await;
+                        // Send [DONE] to terminate stream before breaking,
+                        // guarded by done_sent to match the two other
+                        // [DONE]-emission sites above (otherwise a stream
+                        // that errors right after a response.completed —
+                        // which already set done_sent — would emit a
+                        // duplicate [DONE] that strict OpenAI-compatible
+                        // SDKs reject).
+                        if !done_sent {
+                            done_sent = true;
+                            let _ = tx
+                                .send(Ok(axum::response::sse::Event::default().data("[DONE]")))
+                                .await;
+                        }
                         break;
                     }
                 }
@@ -2442,16 +2451,14 @@ pub fn build_upstream_url(base_url: &str, target_path: &str) -> String {
 }
 
 fn extract_bearer(headers: &HeaderMap) -> Option<String> {
+    // Only accept the "Bearer <token>" form. Other schemes (Basic, Digest,
+    // raw tokens, ...) are ignored — without this guard a "Basic <base64>"
+    // value would be used as if it were an API key, leaking decoded
+    // credentials to upstream providers via the x-api-key header.
     headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .map(|v| {
-            if let Some(stripped) = v.strip_prefix("Bearer ") {
-                stripped.to_string()
-            } else {
-                v.to_string()
-            }
-        })
+        .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.to_string()))
 }
 
 // ============================================================
