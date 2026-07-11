@@ -114,6 +114,7 @@ pub fn build_router(
         .route("/health", get(handle_health))
         .route("/__/models", get(handle_models))
         .route("/__/session", get(handle_session_list))
+        .route("/v1/messages", post(handle_anthropic_messages))
         .route("/v1/{*path}", any(handle_passthrough_any))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .layer(error_dump_layer)
@@ -743,9 +744,20 @@ async fn handle_chat_completions(
                     }
                     Err(e) => {
                         tracing::error!("Stream error: {}", e);
+                        // Send [DONE] to terminate stream before breaking
+                        let _ = tx
+                            .send(Ok(axum::response::sse::Event::default().data("[DONE]")))
+                            .await;
                         break;
                     }
                 }
+            }
+
+            // Ensure [DONE] is sent if stream ended prematurely
+            if !done_sent {
+                let _ = tx
+                    .send(Ok(axum::response::sse::Event::default().data("[DONE]")))
+                    .await;
             }
         });
 
@@ -1840,7 +1852,7 @@ async fn handle_responses_via_anthropic(
             }
 
             // Ensure response.completed is emitted even if stream ended prematurely
-            if translator.started && !translator.event_completed {
+            if !translator.event_completed {
                 let final_resp = translator.make_completed_response();
                 let event = ResponsesStreamEvent::ResponseCompleted {
                     response: final_resp,
@@ -1974,6 +1986,121 @@ async fn handle_responses_via_anthropic(
             serde_json::to_string(&responses_resp).unwrap_or_default(),
         )
             .into_response()
+    }
+}
+
+// ============================================================
+// Anthropic Messages handler — resolves model aliases & routes to provider
+// ============================================================
+
+/// Handles POST /v1/messages (Anthropic Messages API).
+/// Unlike the wildcard passthrough, this resolves model aliases
+/// (e.g. "mimo-pro" → xiaomi/mimo-v2.5-pro, "deepseek-pro" → deepseek/deepseek-v4-pro)
+/// and routes to the correct upstream provider.
+async fn handle_anthropic_messages(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    let mut value: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return AdapterError::bad_request(format!("Invalid JSON: {}", e)).into_response();
+        }
+    };
+
+    let model = value
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("claude-sonnet-4-20250514");
+
+    let (upstream_model, provider) = state.config.resolve_model_and_provider(model);
+
+    // Replace model in JSON body with upstream model name
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "model".to_string(),
+            serde_json::Value::String(upstream_model.clone()),
+        );
+    }
+
+    let body_json = serde_json::to_string(&value).unwrap_or_default();
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
+
+    let client_bearer = extract_bearer(&headers);
+    let api_key: Option<String> = if state.config.prefer_client_key {
+        client_bearer.or_else(|| provider.api_key.clone())
+    } else {
+        provider.api_key.clone().or(client_bearer)
+    };
+
+    let mut upstream_headers = HeaderMap::new();
+    upstream_headers.insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("application/json"),
+    );
+    upstream_headers.insert(
+        HeaderName::from_static("anthropic-version"),
+        HeaderValue::from_static("2023-06-01"),
+    );
+    if let Some(ref key) = api_key {
+        match provider.vendor {
+            crate::config::UpstreamVendor::XiaomiMimo => {
+                if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
+                    upstream_headers.insert(HeaderName::from_static("authorization"), val);
+                }
+            }
+            _ => {
+                if let Ok(val) = HeaderValue::from_str(key) {
+                    upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+                }
+            }
+        }
+    }
+
+    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %upstream_model, req_bytes = %body_json.len(), "anthropic_messages");
+
+    match state
+        .client
+        .post(&upstream_url)
+        .headers(upstream_headers)
+        .body(body_json)
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            let resp_headers = resp.headers().clone();
+            let body_bytes = match resp.bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        axum::Json(
+                            serde_json::json!({"error": {"message": format!("Read error: {}", e)}}),
+                        ),
+                    )
+                        .into_response();
+                }
+            };
+
+            let mut response = Response::new(Body::from(body_bytes));
+            *response.status_mut() = status;
+            for (name, value) in resp_headers.iter() {
+                if name.as_str() != "transfer-encoding" && name.as_str() != "connection" {
+                    response.headers_mut().insert(name.clone(), value.clone());
+                }
+            }
+            response
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "upstream request failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                format!("Upstream request failed: {}", e),
+            )
+                .into_response()
+        }
     }
 }
 
