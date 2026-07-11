@@ -2013,12 +2013,46 @@ async fn handle_anthropic_messages(
         }
     };
 
-    let model = value
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("claude-sonnet-4-20250514");
+    // Anthropic Messages API requires a top-level JSON object. Without this
+    // guard, a top-level array/string/number parses fine but the model
+    // rewrite below is silently skipped and the original alias (e.g.
+    // "mimo-pro") is forwarded verbatim to the upstream, producing an
+    // opaque 4xx from the provider instead of a clear adapter error.
+    if !value.is_object() {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "Request body must be a JSON object.",
+                },
+            })),
+        )
+            .into_response();
+    }
 
-    let (upstream_model, provider) = state.config.resolve_model_and_provider(model);
+    // `model` is required by the Anthropic Messages spec. Silently
+    // substituting a default masks client bugs and may misroute the
+    // request to whichever provider is first in config.
+    let model = match value.get("model").and_then(|v| v.as_str()) {
+        Some(m) => m.to_string(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "`model` is required and must be a string.",
+                    },
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let (upstream_model, provider) = state.config.resolve_model_and_provider(&model);
 
     // /v1/messages is only meaningful for Anthropic-format upstreams.
     // Reject routing to providers configured for OpenAI Chat / Responses —
