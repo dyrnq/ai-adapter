@@ -2016,6 +2016,27 @@ async fn handle_anthropic_messages(
 
     let (upstream_model, provider) = state.config.resolve_model_and_provider(model);
 
+    // /v1/messages is only meaningful for Anthropic-format upstreams.
+    // Reject routing to providers configured for OpenAI Chat / Responses —
+    // those would 404 since they don't expose /v1/messages.
+    if !matches!(provider.format, crate::config::UpstreamFormat::Anthropic) {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": format!(
+                        "Provider '{}' (format={}) does not expose an Anthropic Messages API. \
+                         Use /v1/chat/completions or /v1/responses instead.",
+                        provider.name, provider.format,
+                    ),
+                },
+            })),
+        )
+            .into_response();
+    }
+
     // Replace model in JSON body with upstream model name
     if let Some(obj) = value.as_object_mut() {
         obj.insert(
@@ -2058,9 +2079,21 @@ async fn handle_anthropic_messages(
         }
     }
 
-    tracing::info!(upstream = %upstream_url, provider = %provider.name, model = %upstream_model, req_bytes = %body_json.len(), "anthropic_messages");
+    let is_stream = value
+        .get("stream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
-    match state
+    tracing::info!(
+        upstream = %upstream_url,
+        provider = %provider.name,
+        model = %upstream_model,
+        req_bytes = %body_json.len(),
+        stream = is_stream,
+        "anthropic_messages"
+    );
+
+    let resp = match state
         .client
         .post(&upstream_url)
         .headers(upstream_headers)
@@ -2068,39 +2101,58 @@ async fn handle_anthropic_messages(
         .send()
         .await
     {
-        Ok(resp) => {
-            let status = resp.status();
-            let resp_headers = resp.headers().clone();
-            let body_bytes = match resp.bytes().await {
-                Ok(b) => b,
-                Err(e) => {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        axum::Json(
-                            serde_json::json!({"error": {"message": format!("Read error: {}", e)}}),
-                        ),
-                    )
-                        .into_response();
-                }
-            };
-
-            let mut response = Response::new(Body::from(body_bytes));
-            *response.status_mut() = status;
-            for (name, value) in resp_headers.iter() {
-                if name.as_str() != "transfer-encoding" && name.as_str() != "connection" {
-                    response.headers_mut().insert(name.clone(), value.clone());
-                }
-            }
-            response
-        }
+        Ok(r) => r,
         Err(e) => {
             tracing::error!(error = %e, "upstream request failed");
-            (
+            return (
                 StatusCode::BAD_GATEWAY,
                 format!("Upstream request failed: {}", e),
             )
-                .into_response()
+                .into_response();
         }
+    };
+
+    let status = resp.status();
+    // Skip hop-by-hop headers per RFC 7230; also drop content-length so
+    // axum recomputes it from the actual response body (the upstream value
+    // would otherwise pin a length that no longer matches what we return).
+    let mut response_headers = HeaderMap::new();
+    for (name, value) in resp.headers().iter() {
+        let n = name.as_str();
+        if n == "transfer-encoding" || n == "connection" || n == "content-length" {
+            continue;
+        }
+        response_headers.insert(name.clone(), value.clone());
+    }
+
+    if is_stream {
+        // Forward upstream SSE bytes straight through. reqwest's
+        // bytes_stream() does NOT auto-decompress, so a forwarded
+        // content-encoding header is still correct for the stream path.
+        let stream = resp
+            .bytes_stream()
+            .map(|r| r.map_err(std::io::Error::other));
+        let mut response = Response::new(Body::from_stream(stream));
+        *response.status_mut() = status;
+        *response.headers_mut() = response_headers;
+        response
+    } else {
+        let body_bytes = match resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    axum::Json(
+                        serde_json::json!({"error": {"message": format!("Read error: {}", e)}}),
+                    ),
+                )
+                    .into_response();
+            }
+        };
+        let mut response = Response::new(Body::from(body_bytes));
+        *response.status_mut() = status;
+        *response.headers_mut() = response_headers;
+        response
     }
 }
 
