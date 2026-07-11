@@ -1851,12 +1851,16 @@ async fn handle_responses_via_anthropic(
                 }
             }
 
-            // Ensure response.completed is emitted even if stream ended prematurely
-            if !translator.event_completed {
+            // Ensure response.completed is emitted even if stream ended prematurely,
+            // but only if the translator actually saw a MessageStart — otherwise we'd
+            // emit a ResponseCompleted for a response id the client never received
+            // as created, breaking the Responses-API stream contract. Use next_seq()
+            // so the synthetic event keeps monotonic ordering with prior events.
+            if translator.started && !translator.event_completed {
                 let final_resp = translator.make_completed_response();
                 let event = ResponsesStreamEvent::ResponseCompleted {
                     response: final_resp,
-                    sequence_number: 0,
+                    sequence_number: translator.next_seq(),
                 };
                 send_sse(&tx, &event).await;
             }
