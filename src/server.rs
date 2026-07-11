@@ -114,6 +114,7 @@ pub fn build_router(
         .route("/health", get(handle_health))
         .route("/__/models", get(handle_models))
         .route("/__/session", get(handle_session_list))
+        .route("/v1/messages", post(handle_anthropic_messages))
         .route("/v1/{*path}", any(handle_passthrough_any))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .layer(error_dump_layer)
@@ -743,9 +744,29 @@ async fn handle_chat_completions(
                     }
                     Err(e) => {
                         tracing::error!("Stream error: {}", e);
+                        // Send [DONE] to terminate stream before breaking,
+                        // guarded by done_sent to match the two other
+                        // [DONE]-emission sites above (otherwise a stream
+                        // that errors right after a response.completed —
+                        // which already set done_sent — would emit a
+                        // duplicate [DONE] that strict OpenAI-compatible
+                        // SDKs reject).
+                        if !done_sent {
+                            done_sent = true;
+                            let _ = tx
+                                .send(Ok(axum::response::sse::Event::default().data("[DONE]")))
+                                .await;
+                        }
                         break;
                     }
                 }
+            }
+
+            // Ensure [DONE] is sent if stream ended prematurely
+            if !done_sent {
+                let _ = tx
+                    .send(Ok(axum::response::sse::Event::default().data("[DONE]")))
+                    .await;
             }
         });
 
@@ -1839,12 +1860,16 @@ async fn handle_responses_via_anthropic(
                 }
             }
 
-            // Ensure response.completed is emitted even if stream ended prematurely
+            // Ensure response.completed is emitted even if stream ended prematurely,
+            // but only if the translator actually saw a MessageStart — otherwise we'd
+            // emit a ResponseCompleted for a response id the client never received
+            // as created, breaking the Responses-API stream contract. Use next_seq()
+            // so the synthetic event keeps monotonic ordering with prior events.
             if translator.started && !translator.event_completed {
                 let final_resp = translator.make_completed_response();
                 let event = ResponsesStreamEvent::ResponseCompleted {
                     response: final_resp,
-                    sequence_number: 0,
+                    sequence_number: translator.next_seq(),
                 };
                 send_sse(&tx, &event).await;
             }
@@ -1974,6 +1999,241 @@ async fn handle_responses_via_anthropic(
             serde_json::to_string(&responses_resp).unwrap_or_default(),
         )
             .into_response()
+    }
+}
+
+// ============================================================
+// Anthropic Messages handler — resolves model aliases & routes to provider
+// ============================================================
+
+/// Handles POST /v1/messages (Anthropic Messages API).
+/// Unlike the wildcard passthrough, this resolves model aliases
+/// (e.g. "mimo-pro" → xiaomi/mimo-v2.5-pro, "deepseek-pro" → deepseek/deepseek-v4-pro)
+/// and routes to the correct upstream provider.
+async fn handle_anthropic_messages(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    let mut value: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return AdapterError::bad_request(format!("Invalid JSON: {}", e)).into_response();
+        }
+    };
+
+    // Anthropic Messages API requires a top-level JSON object. Without this
+    // guard, a top-level array/string/number parses fine but the model
+    // rewrite below is silently skipped and the original alias (e.g.
+    // "mimo-pro") is forwarded verbatim to the upstream, producing an
+    // opaque 4xx from the provider instead of a clear adapter error.
+    if !value.is_object() {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "Request body must be a JSON object.",
+                },
+            })),
+        )
+            .into_response();
+    }
+
+    // `model` is required by the Anthropic Messages spec. Silently
+    // substituting a default masks client bugs and may misroute the
+    // request to whichever provider is first in config.
+    let model = match value.get("model").and_then(|v| v.as_str()) {
+        Some(m) => m.to_string(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "`model` is required and must be a string.",
+                    },
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let (upstream_model, provider) = state.config.resolve_model_and_provider(&model);
+
+    // /v1/messages is only meaningful for Anthropic-format upstreams.
+    // Reject routing to providers configured for OpenAI Chat / Responses —
+    // those would 404 since they don't expose /v1/messages.
+    if !matches!(provider.format, crate::config::UpstreamFormat::Anthropic) {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": format!(
+                        "Provider '{}' (format={}) does not expose an Anthropic Messages API. \
+                         Use /v1/chat/completions or /v1/responses instead.",
+                        provider.name, provider.format,
+                    ),
+                },
+            })),
+        )
+            .into_response();
+    }
+
+    // Replace model in JSON body with upstream model name
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "model".to_string(),
+            serde_json::Value::String(upstream_model.clone()),
+        );
+    }
+
+    let body_json = serde_json::to_string(&value).unwrap_or_default();
+    let upstream_url = build_upstream_url(&provider.base_url, "/v1/messages");
+
+    let client_bearer = extract_bearer(&headers);
+    let api_key: Option<String> = if state.config.prefer_client_key {
+        client_bearer.or_else(|| provider.api_key.clone())
+    } else {
+        provider.api_key.clone().or(client_bearer)
+    };
+
+    let mut upstream_headers = HeaderMap::new();
+    upstream_headers.insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("application/json"),
+    );
+    // anthropic-version: prefer the version the client sent, fall back to a
+    // reasonable default. Clients on newer beta features may pin a specific
+    // version and silently break if we hardcode 2023-06-01.
+    const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
+    upstream_headers.insert(
+        HeaderName::from_static("anthropic-version"),
+        headers
+            .get("anthropic-version")
+            .cloned()
+            .unwrap_or_else(|| HeaderValue::from_static(DEFAULT_ANTHROPIC_VERSION)),
+    );
+    // Forward whitelisted Anthropic-specific headers from the client request.
+    // These gate beta features (prompt caching, extended thinking, computer
+    // use, files API, claude-code SDK) — silently dropping them disables
+    // those features with no diagnostic. CORS already allows these headers
+    // through (see allow_headers near the top of this file).
+    const CLIENT_HEADER_PASSTHROUGH: &[&str] = &[
+        "anthropic-beta",
+        "anthropic-dangerous-direct-browser-access",
+    ];
+    for name in CLIENT_HEADER_PASSTHROUGH {
+        if let Some(value) = headers.get(*name) {
+            // HeaderName::from_bytes on a static ASCII name is infallible.
+            upstream_headers.insert(
+                HeaderName::from_bytes(name.as_bytes()).expect("static header name"),
+                value.clone(),
+            );
+        }
+    }
+    if let Some(ref key) = api_key {
+        match provider.vendor {
+            crate::config::UpstreamVendor::XiaomiMimo => {
+                if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
+                    upstream_headers.insert(HeaderName::from_static("authorization"), val);
+                }
+            }
+            _ => {
+                if let Ok(val) = HeaderValue::from_str(key) {
+                    upstream_headers.insert(HeaderName::from_static("x-api-key"), val);
+                }
+            }
+        }
+    }
+
+    let is_stream = value
+        .get("stream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    tracing::info!(
+        upstream = %upstream_url,
+        provider = %provider.name,
+        model = %upstream_model,
+        req_bytes = %body_json.len(),
+        stream = is_stream,
+        "anthropic_messages"
+    );
+
+    let resp = match state
+        .client
+        .post(&upstream_url)
+        .headers(upstream_headers)
+        .body(body_json)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "upstream request failed");
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("Upstream request failed: {}", e),
+            )
+                .into_response();
+        }
+    };
+
+    let status = resp.status();
+    // Response header forwarding:
+    // - Skip hop-by-hop per RFC 7230 (transfer-encoding, connection).
+    // - Skip content-length so axum recomputes it from the actual body bytes
+    //   we return (the upstream value pins a length that no longer matches).
+    // - Skip content-encoding because reqwest auto-decompresses gzip/brotli
+    //   in both resp.bytes() (buffered) and resp.bytes_stream() (streaming),
+    //   so forwarding the original encoding header would mislead the client
+    //   into trying to decompress plaintext.
+    let mut response_headers = HeaderMap::new();
+    for (name, value) in resp.headers().iter() {
+        let n = name.as_str();
+        if n == "transfer-encoding"
+            || n == "connection"
+            || n == "content-length"
+            || n == "content-encoding"
+        {
+            continue;
+        }
+        response_headers.insert(name.clone(), value.clone());
+    }
+
+    if is_stream {
+        // Forward upstream SSE bytes straight through. reqwest's
+        // bytes_stream() does NOT auto-decompress, so a forwarded
+        // content-encoding header is still correct for the stream path.
+        let stream = resp
+            .bytes_stream()
+            .map(|r| r.map_err(std::io::Error::other));
+        let mut response = Response::new(Body::from_stream(stream));
+        *response.status_mut() = status;
+        *response.headers_mut() = response_headers;
+        response
+    } else {
+        let body_bytes = match resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    axum::Json(
+                        serde_json::json!({"error": {"message": format!("Read error: {}", e)}}),
+                    ),
+                )
+                    .into_response();
+            }
+        };
+        let mut response = Response::new(Body::from(body_bytes));
+        *response.status_mut() = status;
+        *response.headers_mut() = response_headers;
+        response
     }
 }
 
@@ -2191,16 +2451,14 @@ pub fn build_upstream_url(base_url: &str, target_path: &str) -> String {
 }
 
 fn extract_bearer(headers: &HeaderMap) -> Option<String> {
+    // Only accept the "Bearer <token>" form. Other schemes (Basic, Digest,
+    // raw tokens, ...) are ignored — without this guard a "Basic <base64>"
+    // value would be used as if it were an API key, leaking decoded
+    // credentials to upstream providers via the x-api-key header.
     headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .map(|v| {
-            if let Some(stripped) = v.strip_prefix("Bearer ") {
-                stripped.to_string()
-            } else {
-                v.to_string()
-            }
-        })
+        .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.to_string()))
 }
 
 // ============================================================

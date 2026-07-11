@@ -190,7 +190,7 @@ impl AnthropicStreamTranslator {
             .as_secs() as i64
     }
 
-    fn next_seq(&mut self) -> u32 {
+    pub fn next_seq(&mut self) -> u32 {
         let s = self.seq;
         self.seq += 1;
         s
